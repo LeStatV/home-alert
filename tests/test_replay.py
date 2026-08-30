@@ -271,6 +271,12 @@ def test_28_aug_every_home_pass_of_the_worst_night_rings_the_phone():
 
     Nine passes, nine sounds -- the night BEHAVIOR.md describes as "9 alarms between
     00:35 and 07:55".
+
+    06:32:14 is the tenth audible push and not a home pass: war_monitor's `🅿️ 2х
+    Борщагівки, Святопетрівське` raises the ring event's count from nothing to two,
+    fifteen minutes after the ring last rang. A count jump is one of the four things
+    SPEC story 7 allows to sound again, and the per-tier cooldown gates it like any
+    other sound.
     """
     assert audible("2026-08-28T00-30_08-00") == [
         ("00:35:53", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
@@ -285,6 +291,7 @@ def test_28_aug_every_home_pass_of_the_worst_night_rings_the_phone():
         ("05:41:58", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
         ("06:17:12", "NEW", "WATCH", "БпЛА поруч"),
         ("06:31:29", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("06:32:14", "RESOUND", "WATCH", "БпЛА поруч"),
         ("07:05:30", "NEW", "WATCH", "БпЛА поруч"),
         ("07:08:12", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
         ("07:51:24", "NEW", "WATCH", "БпЛА поруч"),
@@ -599,3 +606,24 @@ def test_quiet_alone_is_never_an_all_clear():
         ("03:00:30", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
         ("03:13:00", "CLEAR", "INFO", "Відбій — БпЛА над домом"),
     ]
+
+
+def test_a_count_jump_over_the_home_set_rings_again():
+    """SYNTHETIC fixture -- the corpus never raises a count over the home set outside
+    the cooldown, so it cannot supply this one. Wording is war_monitor's own
+    `Київ: 🅿️ Nх реактив <place>` template.
+
+    One drone over the house wakes the household. Six minutes later the same channel
+    says there are four: that is new information, not the same chatter, and SPEC story
+    7 lists a count jump among the four things allowed to ring again. The count itself
+    goes in the body, `≥4`, from the best single source (story 23). Restating four
+    changes nothing -- the same count is the same fact, whatever the cooldown allows.
+    """
+    pushes = bodies("synthetic-count-jump")
+    assert [p[:4] for p in pushes] == [
+        ("02:00:00", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("02:06:00", "RESOUND", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("02:07:00", "UPDATE", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("02:12:00", "UPDATE", "URGENT", "БпЛА НАД ДОМОМ"),
+    ]
+    assert pushes[1][4].startswith("≥4 "), pushes[1][4]

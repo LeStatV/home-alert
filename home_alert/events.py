@@ -125,6 +125,7 @@ class Drone:
     weights: dict = field(default_factory=dict)   # channel -> its best contribution here
     places: list = field(default_factory=list)    # in the order they were reported
     chained: bool = False     # a channel followed its own reply chain into this zone
+    count: int = 0            # largest figure any one channel gave, never their sum
     echo: tuple = None        # (time, places, channel) of the last report folded in
 
     @property
@@ -158,7 +159,7 @@ class Drone:
     def sources(self):
         return tuple(self.weights)      # insertion-ordered: who reported it, first first
 
-    def report(self, message, named, weight, chained):
+    def report(self, message, named, weight, chained, count=0):
         """Fold one report in. A channel restating within `ECHO` what another channel
         just said, naming no place of its own, is half a source -- the aggregator echo
         `channel-eval-kyiv_nebo.md` measured, not a second pair of eyes."""
@@ -172,6 +173,7 @@ class Drone:
             if place not in self.places:
                 self.places.append(place)
         self.chained |= chained
+        self.count = max(self.count, count)
         self.echo = (message.time, set(named), message.channel)
         self.last = message.time
 
@@ -436,10 +438,13 @@ class Pipeline:
             fresh = drone is None or message.time - drone.last > DRONE_WINDOW
             if fresh:
                 drone = self.drones[zone] = Drone(zone, message.time, message.time)
-            was = drone.tier
-            drone.report(message, parse.places, profile.weight, chained)
+            was, counted = drone.tier, drone.count
+            drone.report(message, parse.places, profile.weight, chained, parse.count)
 
-            kind = "NEW" if fresh else "PROMOTE" if drone.tier != was else "UPDATE"
+            # a count jump is new information and may ring again (story 7); restating
+            # the same figure is the same fact, and the cooldown below gates both
+            kind = ("NEW" if fresh else "PROMOTE" if drone.tier != was
+                    else "RESOUND" if drone.count > counted else "UPDATE")
             # The cooldown gates the sound, not the notification: a gated NEW still goes
             # out silently, so the body on the phone stays current (spec story 33). It is
             # kept per zone rather than globally per tier -- a drone that has moved from
@@ -450,7 +455,7 @@ class Pipeline:
                 kind = "UPDATE"
             if kind != "UPDATE":
                 self.sounded[(zone, drone.tier)] = message.time
-            emit(kind, drone.tier, drone.title, drone.tag, event=drone)
+            emit(kind, drone.tier, drone.title, drone.tag, drone.count, drone)
             # ponytail: drone events have no row of their own yet, so record no event
             # rather than the unrelated live ballistic one -- a notifications-to-events
             # join would otherwise credit these pushes to it. Every message and every
