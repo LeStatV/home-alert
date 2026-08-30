@@ -1,5 +1,6 @@
-"""Two state machines, messages in and ntfy pushes out: the ballistic three-stage
-model, and drone events keyed by how close to the household the report is.
+"""Two state machines, messages in and ntfy pushes out: the three-stage launch model
+-- run once per threat type -- and drone events keyed by how close to the household
+the report is.
 
 They share nothing but the message stream -- separate event keys, separate tags,
 separate sounds -- so a drone over Нивки can never mute a ballistic launch on Kyiv.
@@ -19,8 +20,16 @@ PENDING_TTL = timedelta(seconds=90)   # a launch nobody gave a target stops matt
 EVENT_TTL = timedelta(minutes=5)      # an event closes after this long without launches
 
 THREAT_TITLE = "Загроза балістики"
-PENDING_TITLE = "Пуск балістики, ціль уточнюється"
-CONFIRMED_TITLE = "БАЛІСТИКА на Київ"
+# One machine, three event types. `other` is a launch on a city we do not cover: it gets
+# a real event so `replay` and the events table can show it, and never a push (story 12).
+TITLES = {
+    ("ballistic", True): "Пуск балістики, ціль уточнюється",
+    ("ballistic", False): "БАЛІСТИКА на Київ",
+    ("missile", True): "Пуск ракет, ціль уточнюється",
+    ("missile", False): "КРИЛАТІ РАКЕТИ на Київ",
+    ("other", True): "Пуск на інше місто",
+    ("other", False): "Пуск на інше місто",
+}
 
 # -- drones. Also fixed by the spec; only the per-tier cooldowns are the household's.
 DRONE_WINDOW = timedelta(minutes=8)      # one event per zone while reports keep coming
@@ -38,6 +47,10 @@ DRONE_TITLES = {
 
 @dataclass
 class Event:
+    """One live wave of one type. Ballistic and missile events run side by side and
+    share nothing -- separate tag, separate resound clock, separate pending flag -- so a
+    Zircon WATCH can never quiet, promote or re-tag a ballistic launch on Kyiv."""
+    type: str                # ballistic | missile | other
     opened: datetime
     last_launch: datetime    # drives the close: the spec closes on launches, not chatter
     sounded: datetime        # last push that made a noise
@@ -45,6 +58,7 @@ class Event:
     launches: int = 1
     places: set = field(default_factory=set)
     sources: set = field(default_factory=set)
+    counts: dict = field(default_factory=dict)   # channel -> its own largest figure
 
     @property
     def tier(self):
@@ -52,11 +66,22 @@ class Event:
 
     @property
     def title(self):
-        return PENDING_TITLE if self.pending else CONFIRMED_TITLE
+        return TITLES[(self.type, self.pending)]
 
     @property
     def tag(self):
-        return f"bal-{self.opened:%Y%m%dT%H%M%S}"
+        return f"{self.type[:3]}-{self.opened:%Y%m%dT%H%M%S}"
+
+    @property
+    def count(self):
+        """`>=N`: the largest figure any one channel gave, never the sum of them. Five
+        channels each counting the same six missiles is six missiles (story 23)."""
+        return max(self.counts.values(), default=0)
+
+    def fold(self, message, parse, target):
+        self.places |= set(target)
+        self.sources.add(message.channel)
+        self.counts[message.channel] = max(self.counts.get(message.channel, 0), parse.count)
 
 
 @dataclass
@@ -123,7 +148,7 @@ def replay(messages, config, sink, store=None):
     cooldown = {tier: timedelta(minutes=minutes)
                 for tier, minutes in config["drone"]["cooldown_min"].items()}
 
-    event = None
+    live = {}            # event type -> the one live event of that type
     threat_until = None
     context = Context()
     drones = {}          # zone -> the live Drone event there
@@ -135,17 +160,16 @@ def replay(messages, config, sink, store=None):
         parse = rules.classify(text)
         pushes = []
 
-        def emit(kind, tier, title, tag=None):
+        def emit(kind, tier, title, tag, count=0):
+            count = f"\u2265{count} \u00b7 " if count >= 2 else ""
             push = Push(message.time, kind, tier, title,
-                        f"{message.channel}: {text[:120]}",
-                        tag or (event.tag if event else
-                                f"threat-{message.time:%Y%m%dT%H%M%S}"))
+                        f"{count}{message.channel}: {text[:120]}", tag)
             sink(push)
             pushes.append(push)
 
-        def done(with_event=True):
+        def done(event=None):
             if store:
-                store.record(message, parse, event if with_event else None, pushes)
+                store.record(message, parse, event, pushes)
 
         if not text or parse.is_noise:
             done()
@@ -160,72 +184,82 @@ def replay(messages, config, sink, store=None):
         threat_type = threat_type or default_type.get(message.channel)
 
         # the message clock closes stale events and expires unconfirmed launches
-        if event and message.time - event.last_launch > EVENT_TTL:
-            event = None
-        if event and event.pending and message.time - event.opened > PENDING_TTL:
-            event = None
+        for etype, stale in list(live.items()):
+            if (message.time - stale.last_launch > EVENT_TTL
+                    or (stale.pending and message.time - stale.opened > PENDING_TTL)):
+                del live[etype]
 
         # -- stage 1: declared threat -> one silent INFO per window
         if parse.is_threat:
             # a threat during a live event is noise: the household is already alarmed
-            if event is None and (threat_until is None or message.time > threat_until):
-                emit("NEW", "INFO", THREAT_TITLE)
+            if "ballistic" not in live and (threat_until is None
+                                            or message.time > threat_until):
+                emit("NEW", "INFO", THREAT_TITLE, f"threat-{message.time:%Y%m%dT%H%M%S}")
             threat_until = message.time + THREAT_WINDOW
             done()
             continue
 
-        ballistic_context = (parse.names_ballistic or event is not None
+        ballistic_context = (parse.names_ballistic or "ballistic" in live
                              or (threat_until is not None and message.time <= threat_until))
+        # a cruise missile says so in its own words. war_monitor's `Nx ...` house style is
+        # not a drone marker: 54 of those posts are KP, KAB and PRR (issue #4 note).
+        missile = parse.names_missile and not parse.is_drone
 
-        # -- stage 2: launch
-        # a drone report is never a ballistic launch, however much it reads like one
+        # -- stage 2: launch. `у напрямку Києва` is a bearing and opens a WATCH; only an
+        # approach word (`підліт`, `захід`, `на Київ`) makes a place a missile's target.
+        # a drone report is never a launch, however much it reads like one
         # ("1 Заворичі на вихід" names Київщина and matches the launch vocabulary)
-        if (parse.is_launch and (ballistic_context or parse.places)
-                and (parse.names_ballistic or not parse.is_drone)
+        launching = parse.is_launch or (missile and (parse.is_approach or parse.is_direction))
+        if (launching and (ballistic_context or missile or parse.places)
+                and (parse.names_ballistic or missile or not parse.is_drone)
                 and weights.get(message.channel, 0.0) >= LAUNCH_WEIGHT_MIN):
-            if parse.names_non_kyiv:
-                done()          # a launch on another city: its own, log-only event
-                continue
+            etype = "missile" if missile else "ballistic"
+            # gating is on the target, not on every name: `на Київ повз Прилуки, Ніжин`
+            # is ours, `Ціль на Ромни!` is a log-only event of its own
+            if parse.names_non_kyiv and not parse.targets_kyiv:
+                etype = "other"
+            target = parse.places if etype != "missile" or parse.is_approach else ()
+            event = live.get(etype)
             if event is None:
-                event = Event(message.time, message.time, message.time,
-                              pending=not parse.places, places=set(parse.places),
-                              sources={message.channel})
-                emit("NEW", event.tier, event.title)
+                event = live[etype] = Event(etype, message.time, message.time,
+                                            message.time, pending=not target)
+                kind = "NEW"
             else:
                 event.launches += 1
                 event.last_launch = message.time
-                event.places |= set(parse.places)
-                event.sources.add(message.channel)
-                if event.pending and parse.places:
+                kind = ("PROMOTE" if event.pending and target else
+                        "RESOUND" if not event.pending
+                        and message.time - event.sounded >= resound_gap else "UPDATE")
+                if kind != "UPDATE":
                     event.pending = False
                     event.sounded = message.time
-                    emit("PROMOTE", "URGENT", CONFIRMED_TITLE)
-                elif not event.pending and message.time - event.sounded >= resound_gap:
-                    event.sounded = message.time
-                    emit("RESOUND", "URGENT", CONFIRMED_TITLE)
-                else:
-                    emit("UPDATE", event.tier, event.title)
-            done()
+            event.fold(message, parse, target)
+            if etype != "other":
+                emit(kind, event.tier, event.title, event.tag, event.count)
+            done(event)
             continue
 
-        # -- stage 3: trajectory -- bare place names while the event is live
+        # -- stage 3: trajectory -- bare place names while an event is live. The ballistic
+        # event takes them when both types are live: that is what BEHAVIOR.md measured on
+        # 19 Aug, where the bare places belonged to the ballistic waves. A missile pending
+        # is never promoted here -- a bare place is not an approach.
+        event = live.get("ballistic") or live.get("missile")
         if (event and parse.places and parse.terse
                 and not parse.names_non_kyiv and not parse.is_drone and not parse.is_recon):
-            event.places |= set(parse.places)
-            event.sources.add(message.channel)
-            if event.pending:
+            event.fold(message, parse, parse.places)
+            if event.pending and event.type == "ballistic":
                 event.pending = False
                 event.sounded = message.time
-                emit("PROMOTE", "URGENT", CONFIRMED_TITLE)
+                emit("PROMOTE", "URGENT", event.title, event.tag, event.count)
             else:
-                emit("UPDATE", "URGENT", CONFIRMED_TITLE)
-            done()
+                emit("UPDATE", event.tier, event.title, event.tag, event.count)
+            done(event)
             continue
 
         # -- stage 4: impact / all-clear -- body update only, never a sound
         if event and parse.is_clear:
-            emit("UPDATE", event.tier, event.title)
-            done()
+            emit("UPDATE", event.tier, event.title, event.tag, event.count)
+            done(event)
             continue
 
         # -- drones. A report is a place plus a type; the type is usually not in the
@@ -233,7 +267,7 @@ def replay(messages, config, sink, store=None):
         # cities we do not cover, recon flights and all-clears are stored, never pushed.
         drone_report = (threat_type == "drone" and parse.places and parse.terse
                         and not parse.names_non_kyiv and not parse.is_clear
-                        and not parse.is_recon)
+                        and not parse.is_recon and not missile)
         zone = rules.zone(parse.places, home, nearby) if drone_report else None
         if zone:
             tracked = {k: v for k, v in tracked.items()
@@ -267,7 +301,7 @@ def replay(messages, config, sink, store=None):
             # rather than the unrelated live ballistic one -- a notifications-to-events
             # join would otherwise credit these pushes to it. Every message and every
             # push is stored, so a night of drones still replays from those two tables.
-            done(with_event=False)
+            done()
             continue
 
         done()

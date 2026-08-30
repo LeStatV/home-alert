@@ -9,17 +9,27 @@ from harness import audible, replay, sounds
 
 def test_21_aug_ballistic_launch_watch_then_urgent():
     """21 Aug 21:54-22:06: AerisRimor's target-less `ЦІЛЬ` is a WATCH at 21:58:35,
-    promoted to URGENT one second later when Ukrainian_Intelligence names Kyiv."""
+    promoted to URGENT one second later when Ukrainian_Intelligence names Kyiv.
+
+    Four minutes after the ballistic wave is over, a Бандероль cruise wave follows
+    (`3 Бандеролі ... ймовірно на Київ`, `Один Бандероль на Згурівку/Бровари!`,
+    `2-3 Бандеролі в бік Києва`) -- its own event, its own tag, and before #5 it was
+    thirteen silent body updates on the ballistic notification.
+    """
     assert sounds("2026-08-21T21-54_22-06") == [
         ("21:56:24", "NEW", "INFO", "Загроза балістики"),
         ("21:58:35", "NEW", "WATCH", "Пуск балістики, ціль уточнюється"),
         ("21:58:36", "PROMOTE", "URGENT", "БАЛІСТИКА на Київ"),
+        ("22:02:12", "NEW", "URGENT", "КРИЛАТІ РАКЕТИ на Київ"),
+        ("22:04:45", "RESOUND", "URGENT", "КРИЛАТІ РАКЕТИ на Київ"),
     ]
 
 
 def test_21_aug_trajectory_and_impact_never_sound():
-    """Everything after the promotion is a silent body update."""
-    after = [p for p in replay("2026-08-21T21-54_22-06") if p[0] > "21:58:36"]
+    """Everything after the promotion is a silent body update *on the ballistic event*:
+    a cruise wave four minutes later is a separate event and may sound on its own."""
+    after = [p for p in replay("2026-08-21T21-54_22-06")
+             if p[0] > "21:58:36" and p[3] == "БАЛІСТИКА на Київ"]
     assert after, "expected trajectory/impact body updates"
     assert {p[1] for p in after} == {"UPDATE"}
 
@@ -94,14 +104,21 @@ def test_19_aug_ballistic_wave_is_eight_sounds_in_twenty_six_minutes():
     launch message any channel posted. AerisRimor's `ЦІЛЬ` -> `КИЇВ` -> `Балістика` ->
     `На Бровари!!` burst three seconds later resolves into that same event -- never a
     WATCH of its own -- and the seven waves that follow re-sound at most once every two
-    minutes. Eight audible pushes in 26 minutes, the number BEHAVIOR.md measured.
+    minutes. Eight audible ballistic pushes in 26 minutes, the number BEHAVIOR.md
+    measured, and the Zircon wave alongside them is three more on its own event.
+
+    The third ballistic sound moved from 20:58:01 to 20:57:58, kpszsu's `Балістичні
+    ракети на Сумщині, Чернігівщині та Полтавщині курсом на Київ.`: Kyiv-gating is now
+    on the target, so the oblasts a wave crosses no longer suppress a call that says
+    Kyiv is the target. The official channel gets three seconds it used to lose.
 
     The threat declaration at 20:52:17 is INFO: priority 2, silent by spec, not a sound.
     """
-    assert audible("2026-08-19T20-50_21-16") == [
+    assert [p for p in audible("2026-08-19T20-50_21-16")
+            if p[3] == "БАЛІСТИКА на Київ"] == [
         ("20:52:25", "NEW", "URGENT", "БАЛІСТИКА на Київ"),
         ("20:54:40", "RESOUND", "URGENT", "БАЛІСТИКА на Київ"),
-        ("20:58:01", "RESOUND", "URGENT", "БАЛІСТИКА на Київ"),
+        ("20:57:58", "RESOUND", "URGENT", "БАЛІСТИКА на Київ"),
         ("21:00:40", "RESOUND", "URGENT", "БАЛІСТИКА на Київ"),
         ("21:03:16", "RESOUND", "URGENT", "БАЛІСТИКА на Київ"),
         ("21:05:40", "RESOUND", "URGENT", "БАЛІСТИКА на Київ"),
@@ -351,4 +368,22 @@ def test_the_ntfy_boundary_never_makes_an_info_or_an_update_audible():
     assert [(p["topic"], p["priority"]) for p in sent] == [
         ("urgent", 5), ("all", 4), ("all", 2),      # NEW: URGENT bypasses DND, INFO silent
         ("urgent", 1), ("all", 1), ("all", 1),      # UPDATE: a body update never sounds
+    ]
+
+
+def test_20_aug_cruise_missiles_watch_on_direction_then_urgent_on_approach():
+    """20 Aug 02:20-02:30: a cruise-missile wave crosses Полтавщина/Чернігівщина and
+    turns on Kyiv. war_monitor's `3 групи КР повз Переяслав у напрямку Києва` names a
+    direction and no target, so it is a WATCH; AerisRimor's `БРОВАРИ ПІДЛІТ КР!` 63 s
+    later names a Kyiv-oblast place with an approach word and promotes it to URGENT --
+    the 2-3 minute budget before the first group is over the city.
+
+    Before this, every one of those messages read as a drone body update (AerisRimor's
+    `єППО на реактивні БПЛА і КР` had set the channel's type to drone), so the whole
+    cruise approach arrived silent at priority 2.
+    """
+    assert sounds("2026-08-20T02-20_02-30") == [
+        ("02:20:45", "NEW", "INFO", "БпЛА над Києвом"),
+        ("02:26:37", "NEW", "WATCH", "Пуск ракет, ціль уточнюється"),
+        ("02:27:40", "PROMOTE", "URGENT", "КРИЛАТІ РАКЕТИ на Київ"),
     ]
