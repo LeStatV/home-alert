@@ -14,7 +14,10 @@ in `./data`.
 
       TG_API_ID=1234567
       TG_API_HASH=...
-      NTFY_TOKEN=tk_...        # filled in after the ntfy provisioning below
+      NTFY_TOKEN=placeholder   # replace with the real token after provisioning ntfy
+
+  All three must be present from the start: compose interpolates the whole file, so
+  even `docker compose up -d ntfy` refuses to start while one of them is missing.
 
 - In `config.yaml`, point `ntfy.url` at the ntfy service: `http://ntfy` from inside
   compose. The file is mounted read-only, so this needs no rebuild.
