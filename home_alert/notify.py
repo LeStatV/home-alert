@@ -1,6 +1,7 @@
 """The ntfy boundary: everything the household sees leaves through a sink."""
 import json
 import os
+import sys
 import urllib.request
 from dataclasses import dataclass
 from datetime import datetime
@@ -53,11 +54,18 @@ class Ntfy:
             "title": push.title,
             "message": push.body,
             "priority": SILENT if push.kind == "UPDATE" else PRIORITY[push.tier],
-            "tags": [TAGS[push.tier], push.tag],
+            "tags": [TAGS[push.tier]],
+            # ponytail: the stable per-event id rides along but nothing consumes it yet;
+            # wiring it to real replace-in-place is its own ticket. Not a `tag`: ntfy
+            # renders those as visible chips in the notification.
+            "x-event": push.tag,
         }
         request = urllib.request.Request(
             self.url, data=json.dumps(payload).encode(),
             headers={"Content-Type": "application/json"} |
                     ({"Authorization": f"Bearer {self.token}"} if self.token else {}))
-        with urllib.request.urlopen(request, timeout=5) as response:
-            response.read()
+        try:
+            with urllib.request.urlopen(request, timeout=5) as response:
+                response.read()
+        except OSError as error:      # one unreachable push must not end the raid
+            print(f"ntfy push failed ({error}): {push.tier} {push.title}", file=sys.stderr)

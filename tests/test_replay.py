@@ -82,3 +82,37 @@ def test_resound_gap_is_configuration():
     """Widening the resound gap collapses the repeat launch calls into the body."""
     assert [p[1] for p in sounds("2026-08-27T00-00_00-30", resound_gap_min=10)] == [
         "NEW", "PROMOTE", "NEW", "PROMOTE"]
+
+
+def test_cold_burst_launch_on_kyiv_needs_no_prior_context():
+    """SYNTHETIC fixture -- the one shape the corpus never supplies: a launch burst
+    that opens with no declared threat and no ballistic word anywhere. SPEC story 4
+    is unconditional, so naming Kyiv in a launch call is context enough."""
+    assert replay("synthetic-cold-launch-burst") == [
+        ("08:39:50", "NEW", "URGENT", "БАЛІСТИКА на Київ"),
+        ("08:39:58", "UPDATE", "URGENT", "БАЛІСТИКА на Київ"),
+    ]
+
+
+def test_29_aug_onyx_on_odesa_never_becomes_a_kyiv_alert():
+    """29 Aug 02:33-02:40: an Onyx over the Azov-Black Sea approaches Odesa. The
+    declared Crimea threat is a real INFO; nothing else may sound. `Ціль через АЧМ`,
+    `Київ/Київщина — дорозвідка` and Odesa's `Київський район/Аркадія` must not
+    combine into a Kyiv ballistic event."""
+    assert replay("2026-08-29T02-33_02-40") == [
+        ("02:35:23", "NEW", "INFO", "Загроза балістики"),
+    ]
+
+
+def test_19_aug_modifier_apostrophe_target_call_is_a_launch():
+    """AerisRimor types `ЦІЛЬʼ` with U+02BC, which is a word character. The message
+    names no place, so the launch branch is the only way it can push at all."""
+    pushes = replay("2026-08-19T21-04_21-12")
+    assert [p for p in pushes if p[0] == "21:09:38"] == [
+        ("21:09:38", "RESOUND", "URGENT", "БАЛІСТИКА на Київ")]
+    assert [p for p in pushes if p[1] in ("NEW", "PROMOTE", "RESOUND")] == [
+        ("21:05:45", "NEW", "WATCH", "Пуск балістики, ціль уточнюється"),
+        ("21:05:46", "PROMOTE", "URGENT", "БАЛІСТИКА на Київ"),
+        ("21:09:38", "RESOUND", "URGENT", "БАЛІСТИКА на Київ"),
+        ("21:11:45", "RESOUND", "URGENT", "БАЛІСТИКА на Київ"),
+    ]

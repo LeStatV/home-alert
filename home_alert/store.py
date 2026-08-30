@@ -29,7 +29,7 @@ class Store:
             if event:
                 self.db.execute(
                     "insert or replace into events values (?,?,?,?,?,?,?,?)",
-                    (event.tag, event.opened.isoformat(), event.last.isoformat(),
+                    (event.tag, event.opened.isoformat(), event.last_launch.isoformat(),
                      event.tier, event.title, event.launches,
                      json.dumps(sorted(event.places), ensure_ascii=False),
                      json.dumps(sorted(event.sources), ensure_ascii=False)))

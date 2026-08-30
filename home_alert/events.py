@@ -9,6 +9,12 @@ from datetime import datetime, timedelta
 from . import rules
 from .notify import Push
 
+# Fixed by the spec, not by the household -- only the resound gap is tunable.
+LAUNCH_WEIGHT_MIN = 0.6          # a launch on Kyiv from any channel this trusted is URGENT
+THREAT_WINDOW = timedelta(minutes=15)
+PENDING_TTL = timedelta(seconds=90)   # a launch nobody gave a target stops mattering
+EVENT_TTL = timedelta(minutes=5)      # an event closes after this long without launches
+
 THREAT_TITLE = "Загроза балістики"
 PENDING_TITLE = "Пуск балістики, ціль уточнюється"
 CONFIRMED_TITLE = "БАЛІСТИКА на Київ"
@@ -17,7 +23,7 @@ CONFIRMED_TITLE = "БАЛІСТИКА на Київ"
 @dataclass
 class Event:
     opened: datetime
-    last: datetime           # last launch/trajectory report -- the event's liveness
+    last_launch: datetime    # drives the close: the spec closes on launches, not chatter
     sounded: datetime        # last push that made a noise
     pending: bool            # a launch whose target has not been named yet
     launches: int = 1
@@ -39,12 +45,8 @@ class Event:
 
 def replay(messages, config, sink, store=None):
     """Feed messages through the rules and push what the household would have seen."""
-    settings = config["ballistic"]
     weights = config["channels"]
-    threat_window = timedelta(minutes=settings["threat_window_min"])
-    pending_ttl = timedelta(seconds=settings["pending_ttl_s"])
-    event_ttl = timedelta(minutes=settings["event_ttl_min"])
-    resound_gap = timedelta(minutes=settings["resound_gap_min"])
+    resound_gap = timedelta(minutes=config["ballistic"]["resound_gap_min"])
 
     event = None
     threat_until = None
@@ -70,16 +72,17 @@ def replay(messages, config, sink, store=None):
             continue
 
         # the message clock closes stale events and expires unconfirmed launches
-        if event and message.time - event.last > event_ttl:
+        if event and message.time - event.last_launch > EVENT_TTL:
             event = None
-        if event and event.pending and message.time - event.opened > pending_ttl:
+        if event and event.pending and message.time - event.opened > PENDING_TTL:
             event = None
 
         # -- stage 1: declared threat -> one silent INFO per window
         if parse.is_threat:
+            # a threat during a live event is noise: the household is already alarmed
             if event is None and (threat_until is None or message.time > threat_until):
                 emit("NEW", "INFO", THREAT_TITLE)
-            threat_until = message.time + threat_window
+            threat_until = message.time + THREAT_WINDOW
             done()
             continue
 
@@ -87,7 +90,11 @@ def replay(messages, config, sink, store=None):
                              or (threat_until is not None and message.time <= threat_until))
 
         # -- stage 2: launch
-        if parse.is_launch and ballistic_context and weights.get(message.channel, 0.0) >= settings["launch_weight_min"]:
+        # a drone report is never a ballistic launch, however much it reads like one
+        # ("1 Заворичі на вихід" names Київщина and matches the launch vocabulary)
+        if (parse.is_launch and (ballistic_context or parse.places)
+                and (parse.names_ballistic or not parse.is_drone)
+                and weights.get(message.channel, 0.0) >= LAUNCH_WEIGHT_MIN):
             if parse.names_non_kyiv:
                 done()          # a launch on another city: its own, log-only event
                 continue
@@ -98,7 +105,7 @@ def replay(messages, config, sink, store=None):
                 emit("NEW", event.tier, event.title)
             else:
                 event.launches += 1
-                event.last = message.time
+                event.last_launch = message.time
                 event.places |= set(parse.places)
                 event.sources.add(message.channel)
                 if event.pending and parse.places:
@@ -114,8 +121,8 @@ def replay(messages, config, sink, store=None):
             continue
 
         # -- stage 3: trajectory -- bare place names while the event is live
-        if event and parse.places and parse.terse and not parse.names_non_kyiv and not parse.is_drone:
-            event.last = message.time
+        if (event and parse.places and parse.terse
+                and not parse.names_non_kyiv and not parse.is_drone and not parse.is_recon):
             event.places |= set(parse.places)
             event.sources.add(message.channel)
             if event.pending:
