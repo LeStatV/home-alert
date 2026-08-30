@@ -3,7 +3,10 @@ name = "home-alert"
 version = "0.1.0"
 description = "Telegram-monitored air-threat notifier for a Kyiv household"
 requires-python = ">=3.12"
-dependencies = ["pyyaml>=6"]
+dependencies = [
+    "pyyaml>=6",
+    "telethon>=1.44.0",
+]
 
 [project.scripts]
 home-alert = "home_alert.cli:main"

@@ -1,0 +1,37 @@
+# `docker compose up` on the home server. First start is interactive (Telegram login):
+#   mkdir -p data && chmod 700 data
+#   docker compose run --rm -it agent      # type phone + code once, session lands in data/
+#   docker compose up -d
+# Secrets come from ./.env (TG_API_ID, TG_API_HASH, NTFY_TOKEN) -- see docs/deploy.md.
+services:
+  agent:
+    build: .
+    restart: unless-stopped
+    stdin_open: true      # so the first start can ask for the phone number and code
+    tty: true
+    environment:
+      TG_API_ID: ${TG_API_ID:?set TG_API_ID in .env}
+      TG_API_HASH: ${TG_API_HASH:?set TG_API_HASH in .env}
+      NTFY_TOKEN: ${NTFY_TOKEN:?set NTFY_TOKEN in .env}
+    volumes:
+      # Telethon session + SQLite. This is full Telegram account access: keep it 700.
+      - ./data:/app/data
+      # so `ntfy.url` can point at the service below without rebuilding the image
+      - ./config.yaml:/app/config.yaml:ro
+    depends_on: [ntfy]
+
+  ntfy:
+    image: binwiederhier/ntfy      # official server image (docs.ntfy.sh/install)
+    command: serve
+    restart: unless-stopped
+    # loopback only; put the host's Tailscale IP here (e.g. "100.x.y.z:80:80") to let
+    # the phones reach it. Never 0.0.0.0 -- this is the household's alarm channel.
+    ports: ["127.0.0.1:80:80"]
+    volumes:
+      - ./ntfy/server.yml:/etc/ntfy/server.yml:ro
+      - ntfy-lib:/var/lib/ntfy     # user database
+      - ntfy-cache:/var/cache/ntfy # message cache
+
+volumes:
+  ntfy-lib:
+  ntfy-cache:
