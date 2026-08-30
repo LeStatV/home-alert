@@ -1,0 +1,70 @@
+"""The ntfy boundary: everything the household sees leaves through a sink."""
+import json
+import os
+import sys
+import urllib.request
+from dataclasses import dataclass
+from datetime import datetime
+
+PRIORITY = {"URGENT": 5, "WATCH": 4, "INFO": 2}
+SILENT = 1                       # body updates must never make a sound
+TAGS = {"URGENT": "rotating_light", "WATCH": "warning", "INFO": "information_source"}
+
+
+@dataclass(frozen=True, slots=True)
+class Push:
+    time: datetime
+    kind: str       # NEW | PROMOTE | RESOUND (sound) | UPDATE (silent body update)
+    tier: str       # URGENT | WATCH | INFO
+    title: str
+    body: str
+    tag: str        # stable per event, so ntfy replaces the entry in place
+
+
+class Recorder:
+    """Test sink: keeps the pushes instead of sending them."""
+
+    def __init__(self):
+        self.pushes = []
+
+    def __call__(self, push):
+        self.pushes.append(push)
+
+
+class Console:
+    """CLI sink: the notification sequence `replay` prints."""
+
+    def __call__(self, push):
+        print(f"{push.time:%Y-%m-%d %H:%M:%S}  {push.kind:<8} {push.tier:<6} "
+              f"{push.title}  |  {push.body}")
+
+
+class Ntfy:
+    """Publishes to a self-hosted ntfy over its JSON API (headers are latin-1 only,
+    and every title here is Cyrillic)."""
+
+    def __init__(self, config):
+        self.url = config["url"].rstrip("/")
+        self.topics = config["topics"]
+        self.token = os.environ.get(config.get("token_env", "NTFY_TOKEN"))
+
+    def __call__(self, push):
+        payload = {
+            "topic": self.topics[push.tier],
+            "title": push.title,
+            "message": push.body,
+            "priority": SILENT if push.kind == "UPDATE" else PRIORITY[push.tier],
+            "tags": [TAGS[push.tier]],
+        }
+        # ponytail: push.tag (the stable per-event id) is deliberately not sent. ntfy has
+        # no field for it -- `tags` renders as visible chips and an invented key risks a
+        # 400 -- so replace-in-place gets wired when its own ticket verifies a mechanism.
+        request = urllib.request.Request(
+            self.url, data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"} |
+                    ({"Authorization": f"Bearer {self.token}"} if self.token else {}))
+        try:
+            with urllib.request.urlopen(request, timeout=5) as response:
+                response.read()
+        except OSError as error:      # one unreachable push must not end the raid
+            print(f"ntfy push failed ({error}): {push.tier} {push.title}", file=sys.stderr)
