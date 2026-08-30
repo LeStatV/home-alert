@@ -31,6 +31,16 @@ ballistic:
   resound_gap_min: 2       # minimum gap between sounds on one event; the rest of the
                            # three-stage timings are fixed by the spec, see events.py
 
+# The optional second opinion on messages the rules could not type (SPEC story 28).
+# One line switches provider; `none` is the default and the state the agent is
+# designed to run in -- GitHub Models is retired and Copilot billing is unverified,
+# so nothing here may ever be required for an alert. Secrets stay in the environment.
+llm:
+  provider: none          # none | openai | copilot
+  base_url: https://openrouter.ai/api/v1   # any OpenAI-compatible endpoint: OpenRouter,
+  model: meta-llama/llama-3.3-70b-instruct:free   # Ollama (http://localhost:11434/v1), OpenAI
+  api_key_env: OPENROUTER_API_KEY   # `copilot` takes the model only, and the SDK's own login
+
 system:
   heartbeat_min: 360   # "Агент працює" on the `system` topic; every beat replaces the
                        # last one, so the owner reads one line, not a column of them

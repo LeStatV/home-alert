@@ -10,7 +10,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
-from . import profiles, rules
+from . import llm as enrichment, profiles, rules
 from .context import Context
 from .notify import SYSTEM_TOPIC, Push
 
@@ -178,7 +178,11 @@ class Drone:
                 self.places.append(place)
         self.chained |= chained
         self.count = max(self.count, count)
-        self.echo = (message.time, set(named), message.channel)
+        if weight:
+            # a weightless story-30 report is not a fact worth halving a real second
+            # source against: it would turn the wake-up into a WATCH, which is the one
+            # thing a fail-safe path must never do
+            self.echo = (message.time, set(named), message.channel)
         self.last = message.time
 
 
@@ -189,8 +193,11 @@ class Pipeline:
     downstream of this point knows which of the two it is talking to.
     """
 
-    def __init__(self, config, sink, store=None):
+    def __init__(self, config, sink, store=None, enricher=None):
         self.channels = profiles.load(config["profiles"])
+        # the optional second opinion: `llm.provider: none` (the default) is no client
+        # at all, and every path below is written to work without one
+        self.enricher = enricher or enrichment.client(config.get("llm"))
         self.resound_gap = timedelta(minutes=config["ballistic"]["resound_gap_min"])
         self.home, self.nearby = set(config["home"]), set(config["nearby"])
         self.cooldown = {tier: timedelta(minutes=minutes)
@@ -371,6 +378,25 @@ class Pipeline:
         parse = in_context
         threat_type = threat_type or profile.default_type
 
+        # -- the optional second opinion, on the leftovers only (SPEC story 29). A
+        # launch call, a threat declaration and a ballistic word all type themselves
+        # through `rules.type_of`, so the launch path can never reach this line --
+        # which is the whole of story 32. Anything the provider says is folded in
+        # upwards or not at all, and a provider that is slow, down or talking nonsense
+        # leaves the rules verdict exactly where it was.
+        #
+        # ponytail: synchronous, like the ntfy push -- live, this blocks the Telethon
+        # handler on a message nothing else could type. `llm.TIMEOUT` is asked of the
+        # transport and enforced by nobody (see `llm.py`), so the real ceiling is
+        # "however long the provider takes to give up", and only these messages are
+        # ever exposed to it. `await asyncio.to_thread(...)` with a deadline is the
+        # upgrade the day a provider is configured.
+        if self.enricher and enrichment.unresolved(parse, threat_type):
+            parse = enrichment.merge(parse, self.enricher.enrich(message))
+            # deliberately not written into `self.context`: the model typed this one
+            # message, not the next twenty bare place names from the channel
+            threat_type = rules.type_of(parse)
+
         # the message clock closes stale events and expires unconfirmed launches
         for etype, stale in list(self.live.items()):
             if (message.time - stale.last_launch > EVENT_TTL
@@ -468,7 +494,20 @@ class Pipeline:
         drone_report = (threat_type == "drone" and parse.places and parse.terse
                         and not parse.names_non_kyiv and not parse.is_clear
                         and not parse.is_recon)
-        zone = rules.zone(parse.places, self.home, self.nearby) if drone_report else None
+        # -- SPEC story 30, the rules-only failure mode: a terse report naming the house
+        # or the ring that nothing could type -- not the rules, not the reply chain, not
+        # the channel's memory, not the model. `Йде Виноградар на Антонов!` is a drone
+        # over the home set in wording no rule knows, and a rule gap must fail safe
+        # rather than silent. It is folded into the zone's drone event weightless, which
+        # is the whole of the cap: it can open a WATCH and lengthen the chain, and it can
+        # never on its own clear the noisy-OR bar that wakes the house.
+        untyped = (not drone_report and parse.places and parse.terse
+                   and not parse.names_non_kyiv
+                   and enrichment.unresolved(parse, threat_type))
+        zone = (rules.zone(parse.places, self.home, self.nearby)
+                if drone_report or untyped else None)
+        if untyped and zone not in ("HOME", "NEARBY"):
+            zone = None      # an untyped report about Kyiv at large is not a report
         if zone:
             self.tracked = {k: v for k, v in self.tracked.items()
                             if message.time - v[0] <= DRONE_WINDOW}
@@ -476,8 +515,9 @@ class Pipeline:
             # other zone and now puts it here. Replying to its own report of the same
             # zone is the same fact again and must not buy a channel its second source.
             parent = self.tracked.get((message.channel, message.reply_to))
-            chained = bool(parent) and parent[1] != zone
-            self.tracked[(message.channel, message.id)] = (message.time, zone)
+            chained = bool(parent) and parent[1] != zone and not untyped
+            if not untyped:      # an untyped report neither earns nor grants the chain
+                self.tracked[(message.channel, message.id)] = (message.time, zone)
 
             if zone != "KYIV":
                 self.last_near = message.time
@@ -486,7 +526,10 @@ class Pipeline:
             if fresh:
                 drone = self.drones[zone] = Drone(zone, message.time, message.time)
             was, counted = drone.tier, drone.count
-            drone.report(message, parse.places, profile.weight, chained, parse.count)
+            # a weightless report brings its places and nothing else: its count would
+            # be a second way to ring on a message nobody could type (story 7)
+            drone.report(message, parse.places, 0.0 if untyped else profile.weight,
+                         chained, 0 if untyped else parse.count)
 
             # a count jump is new information and may ring again (story 7); restating
             # the same figure is the same fact, and the cooldown below gates both
@@ -513,8 +556,8 @@ class Pipeline:
         done()
 
 
-def replay(messages, config, sink, store=None):
+def replay(messages, config, sink, store=None, enricher=None):
     """Feed messages through the rules and push what the household would have seen."""
-    pipeline = Pipeline(config, sink, store)
+    pipeline = Pipeline(config, sink, store, enricher)
     for message in messages:
         pipeline.feed(message)
