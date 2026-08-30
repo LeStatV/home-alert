@@ -10,6 +10,23 @@ channels:            # trust weight per channel
   Ukrainian_Intelligence: 0.6
   kyiv_nebo: 0.6
 
+default_type:        # a bare place-name post from these channels is this type.
+  kyiv_nebo: drone   # 88% of its posts carry no type word (channel-eval-kyiv_nebo.md);
+                     # moves into the channel profile when #6 introduces them.
+
+# Geometry is named sets, no coordinates (ADR 6). Names are the canonical ones the
+# gazetteer in rules.py produces -- aliases and typos (`анонов`, `файна таун`,
+# `Соф борщага`, `троя`, `ГОЛОС`) resolve to these before they get here.
+home: [Нивки, Антонов]
+nearby: [Святошин, Борщагівка, Шулявка, Сирець, Берковець, Виноградар, Біличі,
+         Академмістечко, Коцюбинське, Гостомель, Відрадний, Рембаза, Пуща-Водиця]
+
+drone:
+  cooldown_min:      # per tier; gates sounds only, body updates stay unlimited
+    URGENT: 5
+    WATCH: 10
+    INFO: 20
+
 ballistic:
   resound_gap_min: 2       # minimum gap between sounds on one event; the rest of the
                            # three-stage timings are fixed by the spec, see events.py

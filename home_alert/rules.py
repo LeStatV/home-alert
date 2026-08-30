@@ -46,7 +46,8 @@ PLACES = {
     r"русанів": "Русанівка", r"звіринц": "Звіринець", r"деміїв": "Деміївка",
     r"теремк": "Теремки", r"сирец|сирц": "Сирець", r"берков": "Берковець",
     r"білич": "Біличі", r"академ": "Академмістечко", r"рембаз": "Рембаза",
-    r"файна": "Файна Таун", r"лісов": "Лісовий", r"биківн": "Биківня",
+    # ЖК Файна Таун stands in the Антонов airspace; AerisRimor types Антонов as `анонов`
+    r"файна": "Антонов", r"лісов": "Лісовий", r"биківн": "Биківня",
     r"хотів": "Хотів", r"теличк": "Теличка",
     # Kyiv oblast: a launch on these is still a launch on us
     r"бровар": "Бровари", r"бориспіл": "Бориспіль", r"вишгород": "Вишгород",
@@ -74,6 +75,21 @@ class Parse:
 
 def places(text):
     return tuple(sorted({name for stem, name in PLACES.items() if re.search(stem, text, re.I)}))
+
+
+def zone(named, home, nearby):
+    """How close to the household a report is: HOME, NEARBY, KYIV, or None.
+
+    The whole geometry -- no coordinates, no distances, just which named set a
+    canonical place falls into (ADR 6). A report naming both takes the nearer one.
+    """
+    if not named:
+        return None
+    if any(place in home for place in named):
+        return "HOME"
+    if any(place in nearby for place in named):
+        return "NEARBY"
+    return "KYIV"
 
 
 def classify(text):

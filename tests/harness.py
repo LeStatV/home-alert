@@ -14,10 +14,15 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures"
 SOUNDS = ("NEW", "PROMOTE", "RESOUND")
 
 
-def replay(fixture, **overrides):
-    """Replay a fixture slice; return every push as (time, kind, tier, title)."""
+def replay(fixture, cooldown_min=None, **overrides):
+    """Replay a fixture slice; return every push as (time, kind, tier, title).
+
+    `cooldown_min` overrides the household's per-tier drone cooldowns, e.g.
+    `cooldown_min={"URGENT": 30}`; anything else overrides the ballistic knobs.
+    """
     config = yaml.safe_load((ROOT / "config.yaml").read_text())
     config["ballistic"].update(overrides)
+    config["drone"]["cooldown_min"].update(cooldown_min or {})
     recorder = notify.Recorder()
     events.replay(reader.read_corpus(FIXTURES / f"{fixture}.jsonl"), config,
                   recorder, store.Store(":memory:"))

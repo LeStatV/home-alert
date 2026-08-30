@@ -37,13 +37,12 @@ class Context:
         self.current = {}    # channel -> (time, type) of its last message that said one
 
     def assemble(self, message, text, parse):
-        """The parse in context, or None when the message is a bump (nothing new).
+        """`(parse, type)` in context, or `(None, None)` when the message is a bump.
 
-        A bump is the same text re-posted as a reply -- the same fact twice. Types are
-        resolved (reply parent first, else what the channel was talking about up to
-        `MEMORY` ago) and remembered, but nothing reads them yet: the drone events of #4
-        are their first consumer, and the chain has to be built from the first message
-        to be right by then.
+        A bump is the same text re-posted as a reply -- the same fact twice. The type is
+        resolved from the message's own words first, else the reply parent, else what
+        the channel was talking about up to `MEMORY` ago; drone events read it to tell
+        a bare `Нивки` from a bare trajectory call.
 
         ponytail: a bump whose parent fell out of the window -- older than `MEMORY`,
         or posted before this replay/process started -- is not recognised as one. That
@@ -64,4 +63,6 @@ class Context:
                 resolved = remembered[1]
 
         self.seen[(message.channel, message.id)] = (message.time, text, resolved)
-        return None if parent and parent[1] == text else parse
+        if parent and parent[1] == text:
+            return None, None
+        return parse, resolved

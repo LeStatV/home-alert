@@ -29,12 +29,16 @@ def test_27_aug_urgent_long_before_the_official_channel():
     The 00:09:50 threat INFO is an edge of the slice, not a result worth reading into:
     the fixture starts at 00:00, so no earlier declaration is in scope to open the
     15-min threat window that would otherwise dedup it.
+
+    The 00:16:49 INFO is war_monitor's `1х реактивний БпЛА над київським водосховищем`:
+    a drone somewhere in the oblast, its own event, priority 2 and silent.
     """
     assert sounds("2026-08-27T00-00_00-30") == [
         ("00:00:18", "NEW", "WATCH", "Пуск балістики, ціль уточнюється"),
         ("00:00:39", "PROMOTE", "URGENT", "БАЛІСТИКА на Київ"),
         ("00:02:47", "RESOUND", "URGENT", "БАЛІСТИКА на Київ"),
         ("00:09:50", "NEW", "INFO", "Загроза балістики"),
+        ("00:16:49", "NEW", "INFO", "БпЛА над Києвом"),
         ("00:24:54", "NEW", "WATCH", "Пуск балістики, ціль уточнюється"),
         ("00:26:22", "PROMOTE", "URGENT", "БАЛІСТИКА на Київ"),
     ]
@@ -148,8 +152,10 @@ def test_29_aug_onyx_on_odesa_never_becomes_a_kyiv_alert():
     """29 Aug 02:33-02:40: an Onyx over the Azov-Black Sea approaches Odesa. The
     declared Crimea threat is a real INFO; nothing else may sound. `Ціль через АЧМ`,
     `Київ/Київщина — дорозвідка` and Odesa's `Київський район/Аркадія` must not
-    combine into a Kyiv ballistic event."""
+    combine into a Kyiv ballistic event. nebo_raketa's `Вишневе` is a real drone in the
+    oblast and opens its own silent INFO -- a separate event key, no sound."""
     assert replay("2026-08-29T02-33_02-40") == [
+        ("02:35:16", "NEW", "INFO", "БпЛА над Києвом"),
         ("02:35:23", "NEW", "INFO", "Загроза балістики"),
     ]
 
@@ -179,8 +185,46 @@ def test_a_kyiv_place_promotes_a_pending_launch_whatever_the_channel_said_before
     ANY channel" with no type qualifier, so it promotes: only a drone word in the
     message's own text may veto, never an inherited or remembered type. Getting this
     wrong leaves the WATCH to expire and the household asleep.
+
+    The opening drone report is its own silent INFO event (Білогородка is oblast, not the
+    ring): drone and ballistic events share the message stream and nothing else.
     """
     assert replay("synthetic-drone-context-still-promotes") == [
+        ("01:00:00", "NEW", "INFO", "БпЛА над Києвом"),
         ("01:02:00", "NEW", "WATCH", "Пуск балістики, ціль уточнюється"),
         ("01:02:20", "PROMOTE", "URGENT", "БАЛІСТИКА на Київ"),
     ]
+
+
+def test_30_aug_the_ring_warns_before_home_wakes_the_house():
+    """30 Aug 09:40-10:20, the nightly jet-drone loop Оболонь -> Нивки -> Вишневе.
+
+    The ring warns first: AerisRimor puts the drone over Шулявка at 09:45:05, a minute
+    before kyiv_nebo's bare `Нивки, Святошин` reaches the home set. kyiv_nebo alone is
+    w=0.6 -- not enough to wake the house -- so that is a WATCH; AerisRimor's
+    `Підвернув на анонов!` four seconds later is a second, independent pair of eyes
+    (it names Антонов, which kyiv_nebo did not, so it is no echo) and the noisy-OR
+    clears 0.8. One URGENT for a drone that circles overhead for the next 22 minutes;
+    everything after is a body update on the same notification.
+    """
+    assert sounds("2026-08-30T09-40_10-20") == [
+        ("09:41:27", "NEW", "INFO", "БпЛА над Києвом"),
+        ("09:45:05", "NEW", "WATCH", "БпЛА поруч"),
+        ("09:46:01", "NEW", "WATCH", "БпЛА над домом — одне джерело"),
+        ("09:46:05", "PROMOTE", "URGENT", "БпЛА НАД ДОМОМ"),
+    ]
+
+
+def test_30_aug_info_is_never_audible_and_typo_places_resolve():
+    """`Нивки на Шулявку.` reaches the home set and updates the URGENT in place;
+    AerisRimor's next line `Ні на Оболонь.` resolves to Оболонь -- Kyiv, but neither
+    home nor ring -- and lands silently on the INFO event. Under the placeholder
+    HOME=Оболонь of BEHAVIOR.md that same line was an URGENT; with the real home set
+    it must not be. No INFO push is ever audible.
+    """
+    pushes = replay("2026-08-30T09-40_10-20")
+    assert [p for p in pushes if p[0] in ("09:50:32", "09:50:39")] == [
+        ("09:50:32", "UPDATE", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("09:50:39", "UPDATE", "INFO", "БпЛА над Києвом"),
+    ]
+    assert [p for p in audible("2026-08-30T09-40_10-20") if p[2] == "INFO"] == []
