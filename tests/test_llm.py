@@ -125,10 +125,8 @@ def test_both_adapters_read_the_same_answer_the_same_way(adapter):
     """Switching provider is a config line and nothing else (SPEC story 28): the same
     canned answer becomes the same enrichment through either transport."""
     client, calls = adapter(ANSWER)
-    parse = rules.classify(MESSAGE.text)
     # the answer's own order, which for a chain of places is the order it was flown
-    assert client.enrich(MESSAGE, parse) == llm.Enrichment("drone",
-                                                           ("Антонов", "Виноградар"))
+    assert client.enrich(MESSAGE) == llm.Enrichment("drone", ("Антонов", "Виноградар"))
     assert len(calls) == 1
     assert MESSAGE.text in calls[0]["prompt"] and MESSAGE.channel in calls[0]["prompt"]
     assert calls[0]["timeout"] == 3.0
@@ -138,15 +136,15 @@ def test_both_adapters_fail_open_when_the_provider_is_unreachable(adapter):
     """The provider is down, rate-limited or past its 3 s: `enrich` says nothing and
     the rules verdict stands (SPEC story 29, story 37)."""
     client, _ = adapter(TimeoutError("timed out"))
-    assert client.enrich(MESSAGE, rules.classify(MESSAGE.text)) is None
+    assert client.enrich(MESSAGE) is None
 
 
 def test_both_adapters_fail_open_on_garbage(adapter):
     """Models answer with prose, half a JSON object, or an apology."""
     client, _ = adapter("Sorry, I cannot help with that.")
-    assert client.enrich(MESSAGE, rules.classify(MESSAGE.text)) is None
+    assert client.enrich(MESSAGE) is None
     client, _ = adapter('{"type": "drone", "places": [')
-    assert client.enrich(MESSAGE, rules.classify(MESSAGE.text)) is None
+    assert client.enrich(MESSAGE) is None
 
 
 def test_no_llm_is_the_default_and_constructs_nothing():
@@ -174,7 +172,7 @@ def test_the_api_key_comes_from_the_named_env_var_and_never_from_the_config(monk
     fake = FakeUrlopen(ANSWER)
     monkeypatch.setattr(llm.urllib.request, "urlopen", fake)
     client = llm.client(CONFIG)
-    client.enrich(MESSAGE, rules.classify(MESSAGE.text))
+    client.enrich(MESSAGE)
     request = fake.calls[0]["request"]
     assert request.headers["Authorization"] == "Bearer sk-secret"
     assert "sk-secret" not in fake.calls[0]["prompt"]

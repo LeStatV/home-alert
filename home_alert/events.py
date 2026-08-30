@@ -386,12 +386,13 @@ class Pipeline:
         # leaves the rules verdict exactly where it was.
         #
         # ponytail: synchronous, like the ntfy push -- live, this blocks the Telethon
-        # handler for up to `llm.TIMEOUT` (3 s) on a message nothing else could type.
-        # That is the ceiling the spec accepts for exactly these messages and for no
-        # others; `await asyncio.to_thread(...)` is the upgrade when the handler grows
-        # a queue.
+        # handler on a message nothing else could type. `llm.TIMEOUT` is asked of the
+        # transport and enforced by nobody (see `llm.py`), so the real ceiling is
+        # "however long the provider takes to give up", and only these messages are
+        # ever exposed to it. `await asyncio.to_thread(...)` with a deadline is the
+        # upgrade the day a provider is configured.
         if self.enricher and enrichment.unresolved(parse, threat_type):
-            parse = enrichment.merge(parse, self.enricher.enrich(message, parse))
+            parse = enrichment.merge(parse, self.enricher.enrich(message))
             # deliberately not written into `self.context`: the model typed this one
             # message, not the next twenty bare place names from the channel
             threat_type = rules.type_of(parse)

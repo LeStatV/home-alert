@@ -1,10 +1,18 @@
 """The optional second opinion: what the rules could not type, an LLM may.
 
 Everything here is allowed to fail. The provider is one config line (SPEC story 28),
-the call has a 3-second budget, and any answer that is late, malformed or absent
+the call is given a 3-second budget, and any answer that is late, malformed or absent
 leaves the rules verdict exactly as it was (story 29). The launch path never comes
 here at all (story 32) -- `events.py` calls `enrich` only for messages nothing else
 could type, and never for a launch.
+
+ponytail: `TIMEOUT` is what the transport is *asked* for, not a deadline anything
+enforces. `urlopen` applies it per socket operation, so a provider dribbling a long
+answer a byte at a time blocks longer than 3 s; the Copilot SDK's `timeout=` is a
+guessed keyword and may be ignored outright, in which case a hung call hangs the
+handler with nothing but a WARNING to show for it. A real ceiling needs the call on
+its own thread (`asyncio.to_thread` + `wait_for`), which is the upgrade the day a
+provider is actually configured.
 """
 import dataclasses
 import importlib
@@ -20,6 +28,7 @@ from . import rules
 log = logging.getLogger(__name__)
 
 TIMEOUT = 3.0            # seconds; the spec's number, not the household's to tune
+                         # -- and asked of the transport, not enforced (see above)
 
 # Types the answer may carry. `recon` is deliberately absent: the drone branch drops
 # recon flights, so letting the model say `recon` would let it *silence* a report --
@@ -110,19 +119,19 @@ class Client:
     whichever provider the household configured.
     """
 
-    def prompt(self, message, parse):
+    def prompt(self, message):
         text = " ".join(message.text.split())
         return (f"Channel: @{message.channel}\nMessage: {text}\n"
                 "What threat type and which places does it report?")
 
-    def enrich(self, message, parse, timeout=TIMEOUT):
+    def enrich(self, message):
         """The model's reading of one message, or None -- late, broken, or unusable.
 
         Nothing here may raise: the caller is the live alert path, and an LLM outage
         must cost the household nothing but the enrichment itself (SPEC story 37).
         """
         try:
-            return read(self.complete(self.prompt(message, parse), timeout))
+            return read(self.complete(self.prompt(message), TIMEOUT))
         except Exception as error:      # noqa: BLE001 -- fail-open is the whole point
             # the type only: an API error's text can carry the request, and the request
             # carries the key. Nothing in this module ever logs `self.key`.
@@ -133,8 +142,8 @@ class Client:
 class OpenAI(Client):
     """Any OpenAI-compatible `/chat/completions` endpoint: OpenRouter, Ollama, OpenAI.
 
-    ponytail: stdlib urllib, like `notify.Ntfy` -- one POST with a 3 s timeout does not
-    need an SDK, and the household's only two HTTP calls now look the same.
+    ponytail: stdlib urllib, like `notify.Ntfy` -- one POST does not need an SDK, and
+    the household's only two HTTP calls now look the same.
     """
 
     def __init__(self, config):
@@ -161,12 +170,13 @@ class Copilot(Client):
     unverified (ARCHITECTURE.md open question), so this is the thinnest adapter that
     can honestly exist -- one call, the same contract, and a loud failure at
     construction if the package is missing. The day someone runs it for real, the
-    only thing that can be wrong is this one method's argument names.
+    only thing that can be wrong is this one method's argument names -- `timeout=`
+    included, which is why nothing here treats it as a real deadline.
     """
 
-    def __init__(self, config, sdk=None):
+    def __init__(self, config):
         try:
-            self.sdk = sdk or importlib.import_module(COPILOT_SDK)
+            self.sdk = importlib.import_module(COPILOT_SDK)
         except ImportError as error:
             raise RuntimeError(
                 f"llm provider `copilot` needs the `{COPILOT_SDK.replace('_', '-')}` "
