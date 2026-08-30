@@ -29,6 +29,8 @@ log = logging.getLogger(__name__)
 
 TIMEOUT = 3.0            # seconds; the spec's number, not the household's to tune
                          # -- and asked of the transport, not enforced (see above)
+DRAFT_TIMEOUT = 60.0     # `add-channel` is the offline path: no household is waiting
+                         # on it, and 500 messages do not summarize in three seconds
 
 # Types the answer may carry. `recon` is deliberately absent: the drone branch drops
 # recon flights, so letting the model say `recon` would let it *silence* a report --
@@ -111,18 +113,42 @@ SYSTEM = (
     "List only places the message itself names. Answer with JSON, never prose.")
 
 
+DRAFT_SYSTEM = (
+    "You write channel profiles for a Ukrainian air-threat monitoring agent. "
+    "You are shown one Telegram channel's recent messages and must describe how that "
+    "channel writes, as one JSON object and nothing else. Answer with JSON, never "
+    "prose. Every regex is Python `re`, case-insensitive, matched against the whole "
+    "message.")
+
+
 class Client:
     """One interface for both providers: `enrich` is the whole of it.
 
-    Adapters implement `complete(prompt, timeout) -> str` and nothing else, so the
-    fail-open, the prompt and the answer parsing are written once and are identical
-    whichever provider the household configured.
+    Adapters implement `complete(prompt, timeout, system) -> str` and nothing else,
+    so the fail-open, the prompts and the answer parsing are written once and are
+    identical whichever provider the household configured. Both callers -- the live
+    `enrich` and `add-channel`'s offline `draft` -- go through that one method; the
+    only thing that differs is the system prompt and the budget.
     """
 
     def prompt(self, message):
         text = " ".join(message.text.split())
         return (f"Channel: @{message.channel}\nMessage: {text}\n"
                 "What threat type and which places does it report?")
+
+    def draft(self, prompt):
+        """The model's profile draft for one channel, raw -- or None if it never came.
+
+        `add-channel` only: the same client and the same transport as `enrich`, with
+        the offline budget and the drafting system prompt. Fail-open like everything
+        else here -- the coverage report has already been printed by the time this
+        runs, and it is worth having on its own (SPEC story 26, #10 AC4).
+        """
+        try:
+            return self.complete(prompt, DRAFT_TIMEOUT, DRAFT_SYSTEM)
+        except Exception as error:      # noqa: BLE001 -- see `enrich`
+            log.warning("llm profile draft skipped (%s)", type(error).__name__)
+            return None
 
     def enrich(self, message):
         """The model's reading of one message, or None -- late, broken, or unusable.
@@ -151,9 +177,9 @@ class OpenAI(Client):
         self.model = config["model"]
         self.key = os.environ.get(config.get("api_key_env") or "OPENAI_API_KEY", "")
 
-    def complete(self, prompt, timeout):
+    def complete(self, prompt, timeout, system=SYSTEM):
         payload = {"model": self.model, "temperature": 0,
-                   "messages": [{"role": "system", "content": SYSTEM},
+                   "messages": [{"role": "system", "content": system},
                                 {"role": "user", "content": prompt}]}
         request = urllib.request.Request(
             self.url, data=json.dumps(payload).encode(),
@@ -185,8 +211,8 @@ class Copilot(Client):
         self.model = config["model"]
         self.client = self.sdk.Client()
 
-    def complete(self, prompt, timeout):
-        return self.client.complete(model=self.model, system=SYSTEM, prompt=prompt,
+    def complete(self, prompt, timeout, system=SYSTEM):
+        return self.client.complete(model=self.model, system=system, prompt=prompt,
                                     timeout=timeout)
 
 

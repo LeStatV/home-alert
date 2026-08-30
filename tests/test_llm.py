@@ -77,6 +77,7 @@ class FakeUrlopen:
 
     def __call__(self, request, timeout=None):
         self.calls.append({"prompt": json.loads(request.data)["messages"][-1]["content"],
+                           "system": json.loads(request.data)["messages"][0]["content"],
                            "timeout": timeout, "request": request})
         if isinstance(self.answer, Exception):
             raise self.answer
@@ -94,7 +95,8 @@ class FakeSDK:
 
         class Client:
             def complete(self, model=None, system=None, prompt=None, timeout=None):
-                sdk.calls.append({"prompt": prompt, "timeout": timeout, "model": model})
+                sdk.calls.append({"prompt": prompt, "timeout": timeout,
+                                  "system": system, "model": model})
                 if isinstance(sdk.answer, Exception):
                     raise sdk.answer
                 return sdk.answer
@@ -130,6 +132,24 @@ def test_both_adapters_read_the_same_answer_the_same_way(adapter):
     assert len(calls) == 1
     assert MESSAGE.text in calls[0]["prompt"] and MESSAGE.channel in calls[0]["prompt"]
     assert calls[0]["timeout"] == 3.0
+
+
+def test_the_offline_draft_call_is_the_same_client_with_its_own_budget(adapter):
+    """`add-channel` drafting is not the alert path: 3 s is the live budget (SPEC
+    story 29), and drafting a profile out of 500 messages is allowed to take a
+    minute. One client, one transport, one different system prompt -- adding a
+    channel must never mean configuring a second provider."""
+    client, calls = adapter('{"noise_patterns": []}')
+    assert client.draft("Draft a profile for @kyiv_nebo") == '{"noise_patterns": []}'
+    assert calls[0]["timeout"] == llm.DRAFT_TIMEOUT == 60.0
+    assert calls[0]["system"] != llm.SYSTEM and "profile" in calls[0]["system"].lower()
+
+
+def test_a_draft_call_that_fails_costs_the_draft_and_nothing_else(adapter):
+    """Same fail-open as `enrich`, for the same reason: the coverage report has
+    already been printed and it is worth having on its own (#10 AC4)."""
+    client, _ = adapter(TimeoutError("timed out"))
+    assert client.draft("Draft a profile") is None
 
 
 def test_both_adapters_fail_open_when_the_provider_is_unreachable(adapter):
