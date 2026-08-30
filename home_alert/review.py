@@ -13,6 +13,7 @@ and applies by hand (`patch -p0`), which is the only way a channel's behaviour e
 changes -- "never auto-applied" is the story, and the byte-identity of `profiles/`
 across a run is the test.
 """
+import argparse
 import difflib
 from collections import defaultdict
 from datetime import timedelta
@@ -55,6 +56,21 @@ def window(text):
     except (KeyError, ValueError, IndexError) as error:
         raise ValueError("--since takes a number of hours or days, e.g. 24h or 7d, "
                          f"not {text!r}") from error
+
+
+def since(text):
+    """The same thing as an argparse `type`: a `--since` nobody can read is an error
+    at the command line, not a week-long window discovered in the output.
+
+    `ArgumentTypeError` and not `ValueError`: argparse prints the message of the
+    first and replaces the second with `invalid since value`, which tells the owner
+    nothing about what a valid one looks like.
+    """
+    try:
+        window(text)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(str(error)) from error
+    return text
 
 
 def collect(config, db, since):

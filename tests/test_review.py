@@ -13,8 +13,11 @@ import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import pytest
+import yaml
+
 from harness import ROOT
-from home_alert import llm, notify, profiles, review, rules, store
+from home_alert import cli, llm, notify, profiles, review, rules, store
 from home_alert.reader import Message
 from test_profiles import seam_2
 
@@ -67,6 +70,7 @@ def test_the_run_reports_what_the_rules_could_not_type_and_says_it_once(tmp_path
         assert text in out
     assert TYPED[0] not in out
     assert OLD not in out                      # 30 h ago, outside the default window
+    assert "no LLM provider configured" in out
 
     assert len(sink.pushes) == 1
     push = sink.pushes[0]
@@ -103,11 +107,11 @@ class FakeLLM(llm.Client):
         return self.answer
 
 
-def run(tmp_path, monkeypatch, answer=CANNED, texts=None, db=None):
+def run(tmp_path, monkeypatch, answer=CANNED, texts=None, db=None, channel=CHANNEL):
     """A review run against a canned provider; returns the review file it wrote."""
     fake = FakeLLM(answer)
     monkeypatch.setattr(llm, "client", lambda config: fake)
-    review.review(config(tmp_path, "openai"), db or seed(tmp_path, texts),
+    review.review(config(tmp_path, "openai"), db or seed(tmp_path, texts, channel),
                   sink=notify.Recorder())
     return tmp_path / "profiles" / "reviews" / f"{NOW:%Y-%m-%d}.diff"
 
@@ -146,8 +150,106 @@ def test_the_diff_applies_to_the_real_profile_and_its_examples_pass_seam_2(
 
 def test_the_profiles_on_disk_are_the_same_bytes_after_a_run(tmp_path, monkeypatch):
     """AC3, and the whole point of the story: a review proposes, it never applies."""
-    before = digest(tmp_path / "profiles") if (tmp_path / "profiles").exists() else None
-    fake_config = config(tmp_path)          # copies the real profile into place
-    before = digest(fake_config["profiles"])
+    directory = config(tmp_path)["profiles"]     # copies the real profile into place
+    before = digest(directory)
     run(tmp_path, monkeypatch)
-    assert digest(fake_config["profiles"]) == before
+    assert digest(directory) == before
+
+
+def test_the_command_line_runs_with_no_ntfy_and_refuses_a_window_it_cannot_read(
+        tmp_path, capsys):
+    """The nightly run is `docker compose run --rm agent ... review`, and it must not
+    need an ntfy server to be worth running -- the report is the half that always
+    works. A `--since` nobody can parse is an error at the command line, not a
+    week-long window discovered in the output."""
+    settings = config(tmp_path) | {"profiles": str(tmp_path / "profiles"),
+                                   "db": seed(tmp_path)}
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(settings, allow_unicode=True), encoding="utf-8")
+
+    cli.main(["review", "--config", str(path)])
+    out = capsys.readouterr().out
+    assert "пепелаци над Святошином" in out
+    assert "no ntfy server" in out
+
+    with pytest.raises(SystemExit):
+        cli.main(["review", "--config", str(path), "--since", "24 hours"])
+    assert "24h or 7d" in capsys.readouterr().err
+
+
+def test_what_the_rules_or_the_night_disagree_with_never_reaches_the_diff(
+        tmp_path, monkeypatch, capsys):
+    """Four things a model proposes happily and none of which may land: a vocabulary
+    the rules do not have, an example of a message nobody posted, an example the
+    classifier reads differently, and a pattern the profile already carries. Each is
+    dropped and written into the review file's header -- a silently shortened
+    proposal reads as a model that agreed with us."""
+    text = run(tmp_path, monkeypatch).read_text(encoding="utf-8")
+    assert "Шахеди над Києвом" not in text.partition("--- ")[2]
+    assert "не летить" not in text
+    for said in ("aviation", "not one of the messages under review",
+                 "the rules say type 'drone', not 'missile'",
+                 "the profile already has it"):
+        assert said in text, said
+    # and the header is comments: `patch` reads past them, which is what makes the
+    # explanation and the diff one file instead of two
+    assert text.startswith("# home-alert review")
+
+
+def test_a_channel_with_no_profile_is_named_and_left_alone(tmp_path, monkeypatch,
+                                                           capsys):
+    """`review` proposes changes to profiles that exist; a channel with none is what
+    `add-channel` is for, and saying so is more use than an empty diff."""
+    file = run(tmp_path, monkeypatch, channel="newcomer")
+    out = capsys.readouterr().out
+    assert not file.exists()
+    assert "add-channel @newcomer" in out
+
+
+@pytest.mark.parametrize("answer", ["Sorry, I cannot help with that.",
+                                    '{"examples": [{"text": "Нивки"',
+                                    '{"type_vocab": "drone", "examples": "some"}'])
+def test_a_provider_that_says_nothing_useful_costs_the_proposal_only(
+        tmp_path, monkeypatch, capsys, answer):
+    """The same fail-open as the live path and as `add-channel`: the report has been
+    printed by the time the provider is asked, and it is the half worth having."""
+    file = run(tmp_path, monkeypatch, answer=answer)
+    out = capsys.readouterr().out
+    assert not file.exists()
+    assert "пепелаци над Святошином" in out
+    assert "4 unparsed across 1 channel, 0 proposals written" in out
+
+
+def test_a_second_night_extends_the_line_the_first_review_added(tmp_path, monkeypatch):
+    """Tonight's proposal has to merge into the `drone:` line last night's review put
+    there. Appending a second `drone:` under `type_vocab:` is a duplicate key, and
+    PyYAML keeps the last one -- which would silently drop last night's words."""
+    first = run(tmp_path, monkeypatch)
+    subprocess.run(["patch", "-p0", "-d", str(tmp_path)], stdin=first.open(),
+                   check=True, capture_output=True)
+
+    tonight = ["три бавовники над Виноградарем"]
+    answer = json.dumps({"type_vocab": {"drone": ["пепелац", "бавовник"]},
+                         "examples": [{"text": tonight[0], "type": "drone",
+                                       "places": ["Виноградар"], "count": 3}]},
+                        ensure_ascii=False)
+    second = run(tmp_path, monkeypatch, answer=answer, texts=tonight,
+                 db=seed(tmp_path, tonight))
+    subprocess.run(["patch", "-p0", "-d", str(tmp_path)], stdin=second.open(),
+                   check=True, capture_output=True)
+
+    profile = tmp_path / "profiles" / f"{CHANNEL}.yaml"
+    assert profile.read_text(encoding="utf-8").count("  drone:") == 1
+    loaded = profiles.load(tmp_path / "profiles")[CHANNEL]
+    assert seam_2(loaded, {"text": "пепелаци над Святошином"})["type"] == "drone"
+    assert seam_2(loaded, {"text": tonight[0]})["type"] == "drone"
+
+
+def test_a_store_nobody_has_written_to_still_says_so_once(tmp_path, capsys):
+    """AC4 is per run, not per finding: a night with nothing in it is exactly the
+    night the owner wants a line about."""
+    sink = notify.Recorder()
+    review.review(config(tmp_path), str(tmp_path / "empty.db"), sink=sink)
+    assert "which is empty" in capsys.readouterr().out
+    assert [push.body for push in sink.pushes] == [
+        "0 unparsed across 0 channels, 0 proposals written"]
