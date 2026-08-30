@@ -181,11 +181,15 @@ def draft_prompt(handle, messages, config):
 
 def _patterns(patterns, note, what):
     """Only the ones that are regexes -- a pattern that does not compile takes the
-    whole profile down at load time, which is a bad way to learn about a typo."""
+    whole profile down at load time, which is a bad way to learn about a typo.
+
+    Compiled joined, because `profiles._compile` joins them with `|`: a pattern that
+    is fine alone and poisonous in a group (`(?i)`) has to be caught here too.
+    """
     kept = []
     for pattern in patterns if isinstance(patterns, list) else ():
         try:
-            re.compile(str(pattern), re.I)
+            re.compile("|".join(kept + [str(pattern)]), re.I)
         except re.error as error:
             note(f"{what} {pattern!r}: not a regex ({error.msg})")
         else:
@@ -236,10 +240,10 @@ def _examples(examples, note):
     return kept
 
 
-def _profile_of(draft, directory):
+def _profile_of(draft):
     """The draft as a real `Profile`, through the real loader -- with a weight, since
     the loader refuses a draft without one, which is the whole point of the draft."""
-    with tempfile.TemporaryDirectory(dir=directory) as temporary:
+    with tempfile.TemporaryDirectory() as temporary:
         file = Path(temporary) / f"{draft['channel']}.yaml"
         file.write_text(yaml.safe_dump(draft | {"weight": 0.0}, allow_unicode=True),
                         encoding="utf-8")
@@ -284,8 +288,7 @@ def write_draft(handle, answer, messages, directory, note):
              "threads_by_reply": replies > len(messages) // 10,
              "default_type": None} | fields
     proposed = draft.pop("examples")
-    draft["examples"] = approved(_profile_of(draft | {"examples": []}, directory),
-                                 proposed, note)
+    draft["examples"] = approved(_profile_of(draft | {"examples": []}), proposed, note)
     print(f"\nexamples: kept {len(draft['examples'])} of {len(proposed)} proposed"
           f" ({len(proposed) - len(draft['examples'])} dropped, the rules disagreed)")
     file = directory / "drafts" / f"{handle}.yaml"
