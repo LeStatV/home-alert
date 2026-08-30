@@ -7,9 +7,10 @@ from dataclasses import dataclass
 TERSE = 140            # launches and trajectory calls are short; digests are not
 
 # -- vocabulary (validated against research/samples-2026-08-30, see BEHAVIOR.md) --
-THREAT = re.compile(r"загроза (застосування )?баліст|балістичн\w* небезпек|ракетна небезпека", re.I)
+THREAT = re.compile(r"загроза (застосування )?баліст|балістичн\w* (небезпек|загроз)|ракетна небезпека", re.I)
 LAUNCH = re.compile(
-    r"(?<!загроза )баліст\w*\s*(на\b|летить|летять|-)"
+    # `\s+` matters: without it `\w*` backtracks and "балістична загроза" reads as "на"
+    r"(?<!загроза )баліст\w*\s+(на\b|летить|летять)|баліст\w*\s*[-—]"
     r"|^\W*(ще |друга |третя |\d+ )?ціл[ьі]\b|\bціл[ьі]\W*$|ціль на"
     r"|спуск баліст|\bвих[іо]д|пуск баліст|балістичн\w* ракет\w* на|\d+ балістик"
     r"|🚀 ?ще\b|🚀 ?пуск", re.I)
