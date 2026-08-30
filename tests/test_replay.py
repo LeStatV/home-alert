@@ -443,3 +443,20 @@ def test_19_aug_a_launch_on_another_city_neither_sounds_nor_changes_the_count():
     before = [p for p in ballistic if p[0] < "20:57:11"][-1]
     after = [p for p in ballistic if p[0] > "20:57:15"][0]
     assert before[4].startswith("≥4 ") and after[4].startswith("≥4 ")
+
+
+def test_21_aug_a_cruise_missile_leaving_kyiv_oblast_is_not_our_alert():
+    """21 Aug 22:18-22:29, the tail of the Бандероль wave: the last one turns away
+    down the Dnipro and AerisRimor calls `Канів підліт 5хв Бандероль.` twice.
+    `підліт` is the word that wakes the house when it comes with a Kyiv place; with
+    Канів, Драбів and Черкащина it is somebody else's five minutes (SPEC story 12).
+
+    Two silent INFO drone updates are all that leaves -- war_monitor's `🅿️ і остання
+    Бандероль ... у напрямку Київщини`, which its own drone marker keeps on the drone
+    event it was already on. Nothing audible at all.
+    """
+    assert replay("2026-08-21T22-18_22-29") == [
+        ("22:18:42", "NEW", "INFO", "БпЛА над Києвом"),
+        ("22:22:42", "UPDATE", "INFO", "БпЛА над Києвом"),
+    ]
+    assert audible("2026-08-21T22-18_22-29") == []
