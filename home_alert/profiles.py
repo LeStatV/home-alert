@@ -41,7 +41,12 @@ class Profile:
 
     def expected_silent(self, when):
         """Is this channel meant to be quiet at this time? A gap inside the window is
-        the channel sleeping, not the agent losing it (#8 shows `N/6 каналів активні`)."""
+        the channel sleeping, not the agent losing it (#8 shows `N/6 каналів активні`).
+
+        ponytail: a window that crosses midnight has to be written as two, e.g.
+        `["22:00-24:00", "00:00-02:00"]`. No channel needs one; the day it does, this
+        is one `if` wide.
+        """
         return any(start <= when.time() < end for start, end in self.quiet_hours)
 
 
@@ -55,6 +60,7 @@ def load(directory):
     loaded = {}
     for file in sorted(Path(directory).glob("*.yaml")):
         raw = yaml.safe_load(file.read_text(encoding="utf-8"))
+        assert isinstance(raw, dict) and "weight" in raw, f"{file.name}: no weight"
         unknown = set(raw) - KEYS
         assert not unknown, f"{file.name}: unknown key(s) {sorted(unknown)}"
         assert raw.get("channel", file.stem) == file.stem, f"{file.name}: channel mismatch"

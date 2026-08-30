@@ -25,3 +25,7 @@ examples:
   - {text: "Зникли.", type: null, stage: clear, places: []}   # 80006, 2026-08-19T21:04:59
   - {text: "🎩Зведення станом на 22:05.", noise: true}
     # 79947, 2026-08-19T19:06:01 -- first line of a 2.2k-char evening briefing
+
+# place_aliases: none. This channel's spellings -- `анонов`, `Троя`, `ГОЛОС`, `Коцюба` --
+# are household geometry, not channel style: any channel can typo Антонов, and a missed
+# home place is the one failure that matters, so they stay in the global gazetteer.
