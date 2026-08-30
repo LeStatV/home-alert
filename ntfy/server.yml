@@ -1,0 +1,18 @@
+# Self-hosted ntfy. Authentication on, nothing readable without an account.
+base-url: http://ntfy.example.net     # how the phones reach this server; edit before use
+cache-file: /var/cache/ntfy/cache.db
+auth-file: /var/lib/ntfy/user.db
+auth-default-access: deny-all         # no anonymous read, no anonymous publish
+
+# iPhones cannot hold a background connection to a self-hosted server: ntfy relays
+# through ntfy.sh for APNS (ARCHITECTURE, Telethon/ntfy notes). Android phones should
+# turn on instant delivery in the app instead.
+upstream-base-url: https://ntfy.sh
+
+# One-time provisioning, after `docker compose up -d`:
+#   docker compose exec ntfy ntfy user add --role=admin admin
+#   docker compose exec ntfy ntfy user add agent          # the publisher
+#   docker compose exec ntfy ntfy user add family         # the phones
+#   docker compose exec ntfy ntfy access agent  "urgent,all,system" write
+#   docker compose exec ntfy ntfy access family "urgent,all,system" read
+#   docker compose exec ntfy ntfy token add agent         # -> NTFY_TOKEN in .env
