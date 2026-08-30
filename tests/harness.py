@@ -25,7 +25,8 @@ def replay(fixture, **overrides):
 
 
 def sounds(fixture, **overrides):
-    """Only the pushes that make a noise: NEW, PROMOTE, RESOUND."""
+    """Pushes of a sound kind: NEW, PROMOTE, RESOUND. An INFO one is still silent
+    (priority 2) -- `audible` is the list the household actually hears."""
     return [p for p in replay(fixture, **overrides) if p[1] in SOUNDS]
 
 
