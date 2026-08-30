@@ -13,7 +13,7 @@ from pathlib import Path
 
 import yaml
 
-from .rules import VOCAB
+from .rules import TYPES, VOCAB
 
 # every key a profile may carry; anything else is a typo, and a typo'd weight or
 # noise pattern would fail silently on the alert path
@@ -44,7 +44,7 @@ class Profile:
         the channel sleeping, not the agent losing it (#8 shows `N/6 каналів активні`).
 
         ponytail: a window that crosses midnight has to be written as two, e.g.
-        `["22:00-24:00", "00:00-02:00"]`. No channel needs one; the day it does, this
+        `["22:00-23:59", "00:00-02:00"]`. No channel needs one; the day it does, this
         is one `if` wide.
         """
         return any(start <= when.time() < end for start, end in self.quiet_hours)
@@ -61,6 +61,10 @@ def load(directory):
     for file in sorted(Path(directory).glob("*.yaml")):
         raw = yaml.safe_load(file.read_text(encoding="utf-8"))
         assert isinstance(raw, dict) and "weight" in raw, f"{file.name}: no weight"
+        weight = float(raw["weight"])
+        assert 0.0 <= weight <= 1.0, f"{file.name}: weight {weight} outside 0..1"
+        assert raw.get("default_type") in (None, *TYPES), (
+            f"{file.name}: default_type {raw['default_type']!r} is not one of {TYPES}")
         unknown = set(raw) - KEYS
         assert not unknown, f"{file.name}: unknown key(s) {sorted(unknown)}"
         assert raw.get("channel", file.stem) == file.stem, f"{file.name}: channel mismatch"
@@ -70,7 +74,7 @@ def load(directory):
             f"{sorted(set(vocab) - set(VOCAB))}")
         loaded[file.stem] = Profile(
             channel=file.stem,
-            weight=float(raw["weight"]),
+            weight=weight,
             default_type=raw.get("default_type"),
             quiet_hours=tuple(_window(w) for w in raw.get("quiet_hours") or ()),
             noise=_compile(raw.get("noise_patterns")),
@@ -83,4 +87,5 @@ def load(directory):
             threads_by_reply=bool(raw.get("threads_by_reply")),
             title=raw.get("title", ""),
         )
+    assert loaded, f"no profiles in {directory}: the notifier would read no channels"
     return loaded

@@ -154,6 +154,11 @@ def count(text):
     return max(numbers, default=0)
 
 
+# every threat type `type_of` can name, and so every value a profile's `default_type`
+# may take: anything else routes nowhere and the channel goes quiet
+TYPES = ("drone", "missile", "recon", "ballistic")
+
+
 def type_of(parse, default=None):
     """The threat type a message names in its own words, or `default` when it names
     none -- the channel's `default_type`, since 88% of kyiv_nebo's posts are a bare

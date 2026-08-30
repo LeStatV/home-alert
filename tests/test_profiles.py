@@ -68,3 +68,21 @@ def test_profile_example(profile, example):
     assert listed and listed <= set(got), f"unknown field(s) in example: {listed - set(got)}"
     assert {field: got[field] for field in listed} == {field: example[field]
                                                        for field in listed}
+
+
+BAD = {
+    "no profiles at all": {},                                   # wrong cwd, empty dir
+    "war_monitor.yaml": "channel: war_monitor\nweight: 8\n",    # the missed decimal point
+    "kyiv_nebo.yaml": "weight: 0.6\ndefault_type: drones\n",    # a type nothing routes on
+}
+
+
+@pytest.mark.parametrize("name,text", list(BAD.items()))
+def test_a_profile_that_would_break_the_alert_path_never_loads(tmp_path, name, text):
+    """A weight of `8` passes every trust threshold there is, a `default_type` nothing
+    matches makes the channel inert, and an empty directory is a notifier with no
+    channels that still exits 0. All three are quiet in production and loud here."""
+    if text:
+        (tmp_path / name).write_text(text, encoding="utf-8")
+    with pytest.raises(AssertionError):
+        profiles.load(tmp_path)
