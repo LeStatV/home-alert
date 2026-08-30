@@ -1,5 +1,6 @@
 """`home-alert run` -- follow the live channels. `replay <from> <to>` -- what the
-household would have been sent."""
+household would have been sent. `add-channel @handle` -- draft a profile for a new
+channel and report what the rules make of its history."""
 import argparse
 import asyncio
 import contextlib
@@ -12,7 +13,7 @@ import yaml
 
 from telethon import TelegramClient
 
-from . import events, notify, profiles, reader, store
+from . import add_channel, events, notify, profiles, reader, store
 
 
 def sink_for(config, ntfy):
@@ -96,8 +97,19 @@ def main(argv=None):
                       help="replay the messages stored in --db, not the corpus")
     past.add_argument("--ntfy", action="store_true",
                       help="also push to the configured ntfy server for real")
+    new = commands.add_parser("add-channel",
+                              help="draft a profile for a channel and report coverage")
+    new.add_argument("handle", help="the channel, e.g. @kyiv_nebo")
+    new.add_argument("--config", default="config.yaml")
+    new.add_argument("--history", help="a JSONL history file to read instead of "
+                                       "fetching from Telegram")
+    new.add_argument("--limit", type=int, default=500,
+                     help="how many of the channel's last messages to read")
     args = parser.parse_args(argv)
 
     config = yaml.safe_load(Path(args.config).read_text(encoding="utf-8"))
-    (run if args.command == "run" else replay)(args, config)
+    if args.command == "add-channel":
+        add_channel.add(args.handle, config, args.history, args.limit)
+    else:
+        (run if args.command == "run" else replay)(args, config)
     return 0

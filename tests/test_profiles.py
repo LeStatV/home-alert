@@ -51,6 +51,19 @@ def examples():
             yield pytest.param(profile, example, id=f"{channel}:{example['text'][:40]}")
 
 
+def seam_2(profile, example):
+    """What the classifier makes of one example: the four documented `Parse` fields
+    plus the noise flag. `tests/test_add_channel.py` reads this too -- there is one
+    seam 2, and a draft's examples are checked against the same one the profiles are.
+    """
+    parse = rules.classify(example["text"], profile)
+    return {"type": rules.type_of(parse, profile.default_type if profile else None),
+            "stage": rules.stage(parse),
+            "places": list(parse.places),
+            "count": parse.count,
+            "noise": parse.is_noise}
+
+
 @pytest.mark.parametrize("profile,example", list(examples()))
 def test_profile_example(profile, example):
     """One labelled message from a profile, through the classifier and out.
@@ -58,12 +71,7 @@ def test_profile_example(profile, example):
     Only the fields the example lists are asserted -- a count-only example says
     nothing about places, and a noise example says nothing at all about type.
     `profile` is None for the global vocabulary table."""
-    parse = rules.classify(example["text"], profile)
-    got = {"type": rules.type_of(parse, profile.default_type if profile else None),
-           "stage": rules.stage(parse),
-           "places": list(parse.places),
-           "count": parse.count,
-           "noise": parse.is_noise}
+    got = seam_2(profile, example)
     listed = set(example) - {"text"}
     assert listed and listed <= set(got), f"unknown field(s) in example: {listed - set(got)}"
     assert {field: got[field] for field in listed} == {field: example[field]
@@ -74,6 +82,7 @@ BAD = {
     "no profiles at all": {},                                   # wrong cwd, empty dir
     "war_monitor.yaml": "channel: war_monitor\nweight: 8\n",    # the missed decimal point
     "kyiv_nebo.yaml": "weight: 0.6\ndefault_type: drones\n",    # a type nothing routes on
+    "newcomer.yaml": "channel: newcomer\nweight: null\n",       # an approved draft
 }
 
 
@@ -86,3 +95,15 @@ def test_a_profile_that_would_break_the_alert_path_never_loads(tmp_path, name, t
         (tmp_path / name).write_text(text, encoding="utf-8")
     with pytest.raises(AssertionError):
         profiles.load(tmp_path)
+
+
+def test_a_draft_whose_weight_is_still_unset_is_refused_by_name(tmp_path):
+    """`add-channel` writes `weight: null`; nothing goes live until the owner sets it.
+    The refusal has to name the file and say what to do -- the alternative is a
+    `TypeError: float() argument must be...` at the live agent's startup."""
+    (tmp_path / "newcomer.yaml").write_text("channel: newcomer\nweight: null\n",
+                                            encoding="utf-8")
+    with pytest.raises(AssertionError) as refused:
+        profiles.load(tmp_path)
+    assert "newcomer.yaml" in str(refused.value)
+    assert "set the weight" in str(refused.value)
