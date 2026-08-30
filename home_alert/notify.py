@@ -12,6 +12,9 @@ PRIORITY = {"URGENT": 5, "WATCH": 4, "INFO": 2}
 # siren (ADR 13). It is not a tier, so it rides as an override on the push.
 SYSTEM_TOPIC = "system"
 SILENT = 1                       # body updates must never make a sound
+# ponytail: if an Android phone is seen dropping a p5 URGENT to silent because a p1
+# update replaced it, SILENT = 2 is the candidate -- still below the ring threshold.
+SILENT_KINDS = ("UPDATE", "CLEAR")   # neither is news: one is a body edit, one is over
 TAGS = {"URGENT": "rotating_light", "WATCH": "warning", "INFO": "information_source"}
 
 
@@ -85,14 +88,16 @@ class Ntfy:
             "topic": push.topic or self.topics[push.tier],
             "title": push.title,
             "message": push.body,
-            "priority": SILENT if push.kind == "UPDATE" else PRIORITY[push.tier],
+            "priority": SILENT if push.kind in SILENT_KINDS else PRIORITY[push.tier],
             "tags": [TAGS[push.tier]],
             # ntfy links messages into a sequence: publishing again with the same
             # `sequence_id` replaces the notification the client already showed
             # (docs.ntfy.sh/publish "Updating notifications"). The event tag is that
             # id, so one event owns one entry in the shade instead of eighty.
-            # Needs ntfy server and Android app >= 2.16; older clients, and iOS
-            # (which is not on the supported list), stack the updates as before.
+            # Needs ntfy server >= 2.16 and Android app >= 1.22.2; older clients, and
+            # iOS (which is not on the supported list), stack the updates as before.
+            # Identity is (server, topic, sequence_id): the same tag on another topic
+            # is another notification, so a push must keep its event's topic.
             "sequence_id": push.tag,
         }
         if push.source:

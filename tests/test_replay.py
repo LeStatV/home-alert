@@ -703,3 +703,19 @@ def test_replay_over_the_live_database_reproduces_the_recorded_pushes(tmp_path, 
     printed = capsys.readouterr().out
     assert printed.splitlines()[0].endswith("2026-08-27T00:00 .. 2026-08-27T00:30")
     assert "БАЛІСТИКА на Київ" in printed
+
+
+def test_the_all_clear_follows_its_event_to_the_topic_it_woke_the_house_on():
+    """ntfy identifies a notification by (server, topic, sequence_id), so the same tag
+    on another topic is another notification. A home event that opens as a WATCH on
+    `all` and is promoted to URGENT on `urgent` has to be closed on `urgent`: anywhere
+    else and the household is left with a live alarm on the phone and an all-clear
+    filed under a topic the family does not even subscribe to.
+
+    The same fixture as the echo test, plus a clear call and eleven quiet minutes.
+    """
+    clear = [p for p in sent("synthetic-echo-is-half-a-source") if p.kind == "CLEAR"]
+    assert [(f"{p.time:%H:%M:%S}", p.tier, p.title, p.topic) for p in clear] == [
+        ("03:42:00", "INFO", "Відбій — БпЛА над домом", "urgent")]
+    # and it is filed under the URGENT topic without ringing like one
+    assert sent_payloads(clear[0])[0]["priority"] == 1

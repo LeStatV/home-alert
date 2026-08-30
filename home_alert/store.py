@@ -47,14 +47,16 @@ class Store:
                  message.edited))
             if event:
                 self.db.execute(
-                    "insert or replace into events values (?,?,?,?,?,?,?,?,?)",
+                    "insert or replace into events (tag, opened, last, tier, title, "
+                    "launches, places, sources, siren) values (?,?,?,?,?,?,?,?,?)",
                     (event.tag, event.opened.isoformat(), event.last_launch.isoformat(),
                      event.tier, event.title, event.launches,
                      json.dumps(event.places, ensure_ascii=False),
                      json.dumps(event.sources, ensure_ascii=False),
                      {True: "on", False: "off"}.get(siren)))
             self.db.executemany(
-                "insert into notifications values (?,?,?,?,?,?)",
+                "insert into notifications (time, kind, tier, title, body, tag) "
+                "values (?,?,?,?,?,?)",
                 [(p.time.isoformat(), p.kind, p.tier, p.title, p.body, p.tag) for p in pushes])
 
     def messages(self, start=None, end=None):

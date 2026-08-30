@@ -122,6 +122,9 @@ async def run(client, channels, on_message, retry_sec=5, on_status=None):
             log.warning("telegram connection lost (%s)", why)
         log.warning("reconnecting in %ds", retry_sec)
         if on_status:
-            on_status(why)
+            try:                          # a push that fails must not end the loop
+                on_status(why)
+            except Exception:
+                log.warning("could not report the disconnect")
         await asyncio.sleep(retry_sec)
         await client.connect()

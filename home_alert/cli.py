@@ -2,6 +2,7 @@
 household would have been sent."""
 import argparse
 import asyncio
+import contextlib
 import logging
 import os
 from datetime import datetime
@@ -57,7 +58,7 @@ def run(args, config):
 
     async def follow():
         beat = asyncio.create_task(notify.heartbeat(
-            sink, config["system"]["heartbeat_min"],
+            sink, config.get("system", {}).get("heartbeat_min", 360),
             lambda: f"{pipeline.active(notify.now())}/{len(pipeline.channels)}"
                     " каналів активні"))
         try:
@@ -66,6 +67,8 @@ def run(args, config):
                                  sink, "Telegram відпав", why))
         finally:
             beat.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await beat
 
     with client:      # prompts for phone + code on first start, reuses the session after
         notify.system(sink, "Агент запущено", f"{len(channels)} каналів")

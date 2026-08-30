@@ -196,6 +196,10 @@ class Pipeline:
         self.cooldown = {tier: timedelta(minutes=minutes)
                          for tier, minutes in config["drone"]["cooldown_min"].items()}
         self.sink, self.store = sink, store
+        # ntfy identifies a notification by (server, topic, sequence_id), so a push
+        # that changes topic starts a new entry. The all-clear has to follow its event
+        # to whichever topic the event has been pushing on.
+        self.topics = config["ntfy"]["topics"]
 
         self.siren = None         # the official siren in м. Київ: on, off, or unknown
         self.siren_off = None     # when it last ended -- half of the all-clear condition
@@ -248,10 +252,19 @@ class Pipeline:
             drone = self.drones.pop(zone, None)
             if drone is None:
                 continue
+            # `drone.tier` only ever rises, so it is still the tier of the event's last
+            # push: the all-clear replaces that entry in place instead of opening a
+            # third one somewhere else, and the family -- who subscribe `urgent` alone
+            # -- get the one push that says they can come out of the corridor.
+            #
+            # ponytail: a WATCH that was promoted left a stale entry behind on the
+            # topic it started on, and this cannot reach it. ntfy has
+            # `PUT /<topic>/<sequence_id>/clear` for exactly that; wiring it is the
+            # owner's call, since it dismisses a notification he may not have read.
             push = Push(when, "CLEAR", "INFO", ALL_CLEAR_TITLES[zone],
                         "\n".join(self.tail(when, drone.places, drone.sources,
                                             drone.last)),
-                        drone.tag)
+                        drone.tag, topic=self.topics[drone.tier])
             self.sink(push)
             sent.append(push)
         return sent
@@ -317,7 +330,7 @@ class Pipeline:
                     if self.siren:
                         self.siren_off = message.time
                     self.siren = False
-            pushes = self.stand_down(message.time) + self.coverage(message.time) + self.coverage(message.time)
+            pushes = self.stand_down(message.time) + self.coverage(message.time)
             if self.store:
                 self.store.record(message, rules.classify(text), None, pushes)
             return

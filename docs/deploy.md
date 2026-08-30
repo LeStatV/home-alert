@@ -62,7 +62,7 @@ anonymous subscriber sees nothing.
   agent gets by publishing every update with the same ntfy `sequence_id`
   ([docs.ntfy.sh/publish](https://docs.ntfy.sh/publish/#updating-notifications)). This
   needs the ntfy **server >= 2.16** (pinned in `docker-compose.yml`) and the **Android
-  app >= 2.16**. iOS is not on ntfy's supported list for notification updates, so an
+  app >= 1.22.2** (the app is versioned 1.x, the server 2.x). iOS is not on ntfy's supported list for notification updates, so an
   iPhone stacks the updates -- there is nothing the agent can send to change that.
   Worth an eyeball on the phone after the first raid: the trajectory should rewrite one
   notification, not add one per report.
