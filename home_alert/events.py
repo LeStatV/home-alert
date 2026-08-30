@@ -172,6 +172,13 @@ class Pipeline:
         own timestamp, i.e. wall clock modulo delivery lag. Nothing here is timer-driven,
         so a stale event closes on the next message rather than on the second it expires.
         """
+        if message.edited:
+            # The spec alerts on posts, not on corrections to them: an edit is recorded
+            # and goes no further. Re-running the rules would re-sound an event that has
+            # already woken the house over text the channel merely tidied up.
+            if self.store:
+                self.store.record_edit(message)
+            return
         profile = self.channels.get(message.channel)
         if profile is None:      # no profile, no channel: the files are the channel list
             return
