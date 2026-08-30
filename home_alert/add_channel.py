@@ -278,9 +278,17 @@ def approved(profile, examples, note):
 
 def write_draft(handle, answer, messages, directory, note):
     """The validated draft on disk, or None if there was nothing to write."""
-    fields = validate(answer, note)
+    try:
+        fields = validate(answer, note)
+    except Exception as error:      # noqa: BLE001 -- fail-open, as everywhere the LLM
+        # An answer can be prose with a brace in it, JSON cut off mid-sentence, or
+        # JSON of an entirely different shape. The coverage report has already been
+        # printed by now and it is worth having on its own (#10 AC4).
+        note(f"the answer could not be read ({type(error).__name__})")
+        fields = None
     if fields is None:
-        print("\nthe provider did not answer with JSON -- profile drafting skipped.")
+        print("\nthe provider did not answer with usable JSON -- profile drafting "
+              "skipped.")
         return None
     replies = sum(1 for message in messages if message.reply_to)
     draft = {"channel": handle, "weight": None, "language": "uk",

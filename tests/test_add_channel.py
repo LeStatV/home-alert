@@ -159,10 +159,21 @@ def test_the_draft_is_not_live_and_says_what_is_missing(tmp_path, monkeypatch, c
         profiles.load(tmp_path / "profiles")
 
 
+# An apology, prose that happens to contain braces, JSON cut off mid-answer, and JSON
+# of the wrong shape entirely -- four answers a 60-second call really does come back
+# with, and none of them may cost the owner the report they already waited for.
+USELESS = ["Sorry, I cannot help with that.",
+           "Here {is} my thinking about the channel...",
+           '{"noise_patterns": ["a"], "examples": [{"text": "Нивки"',
+           '{"type_vocab": "clear", "examples": "about thirty of them"}']
+
+
+@pytest.mark.parametrize("answer", USELESS)
 def test_a_provider_that_says_nothing_useful_costs_the_draft_only(tmp_path, monkeypatch,
-                                                                  capsys):
-    """Same fail-open as the live path: the coverage report has already been printed."""
-    file = draft(tmp_path, monkeypatch, answer="Sorry, I cannot help with that.")
+                                                                  capsys, answer):
+    """Same fail-open as the live path: the coverage report has already been printed,
+    and it is the half of this command that is worth having on its own."""
+    file = draft(tmp_path, monkeypatch, answer=answer)
     out = capsys.readouterr().out
     assert not file.exists()
     assert "unparsed" in out and "drafting skipped" in out
