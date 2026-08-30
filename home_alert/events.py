@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 from . import rules
+from .context import Context
 from .notify import Push
 
 # Fixed by the spec, not by the household -- only the resound gap is tunable.
@@ -50,10 +51,12 @@ def replay(messages, config, sink, store=None):
 
     event = None
     threat_until = None
+    context = Context()
 
     for message in messages:
         text = " ".join(message.text.split())
         parse = rules.classify(text)
+        in_context = context.assemble(message, text, parse)
         pushes = []
 
         def emit(kind, tier, title):
@@ -67,9 +70,11 @@ def replay(messages, config, sink, store=None):
             if store:
                 store.record(message, parse, event, pushes)
 
-        if not text or parse.is_noise:
+        # a bump -- the same text re-posted as a reply -- is the same fact twice
+        if not text or parse.is_noise or in_context is None:
             done()
             continue
+        parse = in_context
 
         # the message clock closes stale events and expires unconfirmed launches
         if event and message.time - event.last_launch > EVENT_TTL:

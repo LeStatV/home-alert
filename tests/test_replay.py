@@ -1,4 +1,4 @@
-from harness import replay, sounds
+from harness import audible, replay, sounds
 
 
 def test_21_aug_ballistic_launch_watch_then_urgent():
@@ -22,18 +22,27 @@ def test_27_aug_urgent_long_before_the_official_channel():
     """27 Aug 00:00-00:30: `Вихід балістики з Брянська` opens a WATCH; kyiv_nebo
     names Kyiv 21 s later and promotes it -- 26 minutes before kpszsu's 00:26:40.
 
-    The 00:04:58 and 00:28:56 resounds are war_monitor bumping its own launch post
-    as a reply. Bump dedup is context assembly, which this ticket leaves out.
+    Three of the old resounds were bumps -- war_monitor and Ukrainian_Intelligence
+    re-posting their own launch as a reply (00:02:41, 00:04:58, 00:28:56). A bump is
+    a no-op, so the second sound is now AerisRimor's own next launch call at 00:02:47,
+    and the event closes 5 min after the last real launch -- early enough that the
+    00:09:50 threat declaration is no longer swallowed by a live event.
     """
     assert sounds("2026-08-27T00-00_00-30") == [
         ("00:00:18", "NEW", "WATCH", "Пуск балістики, ціль уточнюється"),
         ("00:00:39", "PROMOTE", "URGENT", "БАЛІСТИКА на Київ"),
-        ("00:02:41", "RESOUND", "URGENT", "БАЛІСТИКА на Київ"),
-        ("00:04:58", "RESOUND", "URGENT", "БАЛІСТИКА на Київ"),
+        ("00:02:47", "RESOUND", "URGENT", "БАЛІСТИКА на Київ"),
+        ("00:09:50", "NEW", "INFO", "Загроза балістики"),
         ("00:24:54", "NEW", "WATCH", "Пуск балістики, ціль уточнюється"),
         ("00:26:22", "PROMOTE", "URGENT", "БАЛІСТИКА на Київ"),
-        ("00:28:56", "RESOUND", "URGENT", "БАЛІСТИКА на Київ"),
     ]
+
+
+def test_bump_reposts_are_a_no_op():
+    """27 Aug: war_monitor's 00:28:56 re-post of `Київ — спуск балістики! Третя`
+    as a reply to itself is the same fact twice -- no event, no update, no sound."""
+    bumps = {"00:00:36", "00:00:51", "00:02:41", "00:26:34", "00:28:56"}
+    assert [p for p in replay("2026-08-27T00-00_00-30") if p[0] in bumps] == []
 
 
 def test_target_less_launch_expires_without_ever_sounding_urgent():
@@ -80,7 +89,7 @@ def test_19_aug_launches_on_other_cities_stay_below_the_notifier():
 
 def test_resound_gap_is_configuration():
     """Widening the resound gap collapses the repeat launch calls into the body."""
-    assert [p[1] for p in sounds("2026-08-27T00-00_00-30", resound_gap_min=10)] == [
+    assert [p[1] for p in audible("2026-08-27T00-00_00-30", resound_gap_min=10)] == [
         "NEW", "PROMOTE", "NEW", "PROMOTE"]
 
 
