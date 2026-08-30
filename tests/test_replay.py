@@ -5,7 +5,7 @@ from unittest import mock
 
 from home_alert import notify
 from home_alert.notify import Push
-from harness import audible, bodies, replay, sounds
+from harness import audible, bodies, replay, sent, sounds
 
 
 def test_21_aug_ballistic_launch_watch_then_urgent():
@@ -627,3 +627,25 @@ def test_a_count_jump_over_the_home_set_rings_again():
         ("02:12:00", "UPDATE", "URGENT", "БпЛА НАД ДОМОМ"),
     ]
     assert pushes[1][4].startswith("≥4 "), pushes[1][4]
+
+
+def test_the_system_topic_warns_when_every_channel_goes_quiet_under_a_siren():
+    """SYNTHETIC fixture -- coverage going dark is the one thing the corpus cannot
+    show, since the corpus is what the channels did post. The siren feed's own
+    nationwide traffic is what keeps the clock running while the six are silent.
+
+    A drone over the house at 03:30, the Kyiv siren from 03:30:05, and then nobody
+    says anything for eleven minutes: the owner is told his eyes are shut (story 15).
+    Once per siren, on the `system` topic, and never again while it lasts.
+
+    03:30-03:45 UTC is inside kyiv_nebo's 03:00-07:00 blackout, so that channel's
+    silence is its habit and is exempt -- the warning here is the other five.
+    """
+    pushes = sent("synthetic-silent-while-siren")
+    assert [(f"{p.time:%H:%M:%S}", p.kind, p.tier, p.title) for p in pushes] == [
+        ("03:30:00", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("03:41:00", "SYSTEM", "INFO", "Канали мовчать під тривогою"),
+    ]
+    assert pushes[1].topic == "system"
+    assert "kyiv_nebo" not in pushes[1].body, pushes[1].body
+    assert "war_monitor" in pushes[1].body, pushes[1].body

@@ -116,3 +116,45 @@ def test_a_disconnect_reconnects_and_says_so(caplog):
     assert client.connects == 2, "reconnected once per disconnect"
     assert caplog.text.count("reconnecting") == 2
     assert "ConnectionError" in caplog.text and "kaput" not in caplog.text
+
+
+def test_a_disconnect_tells_the_owner_on_the_system_topic():
+    """Coverage gone dark is the owner's business (SPEC story 15), and Telegram
+    dropping the connection is the commonest way it goes. One note per disconnect on
+    the `system` topic, carrying the exception's type and never its text -- that can
+    hold request detail."""
+    class Flaky(FakeClient):
+        async def run_until_disconnected(self):
+            await super().run_until_disconnected()
+            if self.disconnects > 2:
+                raise SystemExit
+            raise ConnectionError("kaput")
+
+    recorder = notify.Recorder()
+    client = Flaky(["war_monitor"])
+    with pytest.raises(SystemExit):
+        asyncio.run(reader.run(
+            client, ["war_monitor"], lambda m: None, retry_sec=0,
+            on_status=lambda why: notify.system(recorder, "Telegram відпав", why)))
+
+    assert [(p.kind, p.tier, p.title, p.body, p.topic) for p in recorder.pushes] == [
+        ("SYSTEM", "INFO", "Telegram відпав", "ConnectionError", "system"),
+        ("SYSTEM", "INFO", "Telegram відпав", "ConnectionError", "system"),
+    ]
+
+
+def test_the_heartbeat_replaces_one_entry_instead_of_stacking():
+    """"The agent is still here" is only worth one line in the shade, so every
+    heartbeat carries the same tag and replaces the last one (ADR 12/13)."""
+    recorder = notify.Recorder()
+
+    async def go():
+        beat = asyncio.create_task(
+            notify.heartbeat(recorder, minutes=0.001, status=lambda: "6/6 каналів активні"))
+        await asyncio.sleep(0.2)
+        beat.cancel()
+
+    asyncio.run(go())
+    assert len(recorder.pushes) >= 2, recorder.pushes
+    assert {(p.kind, p.topic, p.tag, p.body) for p in recorder.pushes} == {
+        ("SYSTEM", "system", "system-heartbeat", "6/6 каналів активні")}

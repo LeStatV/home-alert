@@ -1,6 +1,7 @@
 """`home-alert run` -- follow the live channels. `replay <from> <to>` -- what the
 household would have been sent."""
 import argparse
+import asyncio
 import logging
 import os
 from datetime import datetime
@@ -43,15 +44,34 @@ def run(args, config):
     # above never do, and nothing here logs a token or the session file's contents.
     logging.getLogger("telethon").setLevel(logging.WARNING)
 
-    channels = sorted(profiles.load(config["profiles"]))
-    pipeline = events.Pipeline(config, sink_for(config, ntfy=True),
-                               store.Store(args.db or config["db"]))
+    sink = sink_for(config, ntfy=True)
+    # the siren feed has no profile and no weight -- it is read for one bit -- so it is
+    # not in the profiles directory and has to be added to the follow list by hand.
+    channels = sorted(profiles.load(config["profiles"])) + [events.SIREN_CHANNEL]
+    pipeline = events.Pipeline(config, sink, store.Store(args.db or config["db"]))
     client = TelegramClient(config["telegram"]["session"],
                             int(os.environ["TG_API_ID"]), os.environ["TG_API_HASH"])
+
+    async def follow():
+        beat = asyncio.create_task(notify.heartbeat(
+            sink, config["system"]["heartbeat_min"],
+            lambda: f"{pipeline.active(notify.now())}/{len(pipeline.channels)}"
+                    " каналів активні"))
+        try:
+            await reader.run(client, channels, pipeline.feed,
+                             on_status=lambda why: notify.system(
+                                 sink, "Telegram відпав", why))
+        finally:
+            beat.cancel()
+
     with client:      # prompts for phone + code on first start, reuses the session after
-        # `client.loop` is Telethon 1.x's own loop handle; fine on the pinned 3.12, and
-        # it is what goes when Telethon 2 drops it.
-        client.loop.run_until_complete(reader.run(client, channels, pipeline.feed))
+        notify.system(sink, "Агент запущено", f"{len(channels)} каналів")
+        try:
+            # `client.loop` is Telethon 1.x's own loop handle; fine on the pinned 3.12,
+            # and it is what goes when Telethon 2 drops it.
+            client.loop.run_until_complete(follow())
+        finally:
+            notify.system(sink, "Агент зупинено")
 
 
 def main(argv=None):

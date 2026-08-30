@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 
 from . import profiles, rules
 from .context import Context
-from .notify import Push
+from .notify import SYSTEM_TOPIC, Push
 
 # Fixed by the spec, not by the household -- only the resound gap is tunable.
 LAUNCH_WEIGHT_MIN = 0.6          # a launch on Kyiv from any channel this trusted is URGENT
@@ -52,6 +52,10 @@ ACTIVE_WINDOW = timedelta(minutes=30)
 # The corridor signal: this long without a report over the house or in the ring, and
 # somebody saying it is over, and the household is told it can come out (ADR 10).
 ALL_CLEAR_QUIET = timedelta(minutes=10)
+# Every channel quiet this long while the Kyiv siren sounds means the household's eyes
+# are shut, and only the owner's `system` topic hears about it (SPEC story 15).
+SILENT_WARN = timedelta(minutes=10)
+SILENT_TITLE = "Канали мовчать під тривогою"
 CHAIN = 6                # places shown in the body; a night-long event names dozens
 
 # The all-clear is titled by zone, not by the event's tier: "Відбій — БпЛА над домом"
@@ -198,6 +202,8 @@ class Pipeline:
         self.cleared_at = None    # when a channel last said it was over -- the other half
         self.last_near = None     # last report over the house or in the ring
         self.last_post = {}       # channel -> when it last posted anything at all
+        self.started = None       # first message seen: nothing is "silent" before it
+        self.warned = False       # the silent-channel warning, once per siren
         self.live = {}            # event type -> the one live event of that type
         self.threat_until = None
         self.context = Context()
@@ -251,6 +257,31 @@ class Pipeline:
             sent.append(push)
         return sent
 
+    def coverage(self, when):
+        """Warn the owner, once per siren, when the household's eyes have shut: the
+        Kyiv siren is sounding and every channel that is not inside its profile's
+        `quiet_hours` has been quiet for ten minutes (SPEC story 15).
+
+        The exemption is what keeps kyiv_nebo's nightly 03:00-07:00 blackout from
+        crying wolf every night; a channel that is merely asleep is not an outage.
+        """
+        quiet = [channel for channel, profile in sorted(self.channels.items())
+                 if not profile.expected_silent(when)
+                 and when - self.last_post.get(channel, self.started) >= SILENT_WARN]
+        awake = sum(1 for profile in self.channels.values()
+                    if not profile.expected_silent(when))
+        if (not self.siren or self.warned or not quiet or len(quiet) < awake
+                or when - self.started < SILENT_WARN):
+            return []
+        self.warned = True
+        push = Push(when, "SYSTEM", "INFO", SILENT_TITLE,
+                    f"мовчать: {', '.join(quiet)}\n"
+                    f"{SIREN_LABEL[self.siren]} · {self.active(when)}/"
+                    f"{len(self.channels)} каналів активні",
+                    f"silent-{when:%Y%m%dT%H%M%S}", topic=SYSTEM_TOPIC)
+        self.sink(push)
+        return [push]
+
     def active(self, when):
         """How many channels have posted anything at all lately -- plain recency, the
         `N/6` the household reads as "how many pairs of eyes are open right now".
@@ -272,20 +303,23 @@ class Pipeline:
             if self.store:
                 self.store.record_edit(message)
             return
+        self.started = self.started or message.time
         text = " ".join(message.text.split())
         if message.channel == SIREN_CHANNEL:
             # The one channel with no profile and no weight. It classifies nothing and
             # scores nothing; it flips one bit that every push then shows.
             if SIREN_KYIV.search(text):
                 if SIREN_ON.search(text):
+                    if not self.siren:      # a new siren, a new chance to warn
+                        self.warned = False
                     self.siren = True
                 elif SIREN_OFF.search(text):
                     if self.siren:
                         self.siren_off = message.time
                     self.siren = False
-            cleared = self.stand_down(message.time)
+            pushes = self.stand_down(message.time) + self.coverage(message.time) + self.coverage(message.time)
             if self.store:
-                self.store.record(message, rules.classify(text), None, cleared)
+                self.store.record(message, rules.classify(text), None, pushes)
             return
         profile = self.channels.get(message.channel)
         if profile is None:      # no profile, no channel: the files are the channel list

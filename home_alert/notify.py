@@ -1,12 +1,16 @@
 """The ntfy boundary: everything the household sees leaves through a sink."""
+import asyncio
 import json
 import os
 import sys
 import urllib.request
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 
 PRIORITY = {"URGENT": 5, "WATCH": 4, "INFO": 2}
+# The owner's own topic: agent up, agent down, Telegram lost, everybody quiet under a
+# siren (ADR 13). It is not a tier, so it rides as an override on the push.
+SYSTEM_TOPIC = "system"
 SILENT = 1                       # body updates must never make a sound
 TAGS = {"URGENT": "rotating_light", "WATCH": "warning", "INFO": "information_source"}
 
@@ -20,6 +24,31 @@ class Push:
     body: str
     tag: str        # stable per event, so ntfy replaces the entry in place
     source: str = ""   # t.me link to the post behind it -- the "view source" action
+    topic: str = ""    # overrides the tier's topic; only the `system` topic uses it
+
+
+def now():
+    """Naive UTC, the clock every timestamp in this project is in."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def system(sink, title, body="", tag=None):
+    """A note on the owner's own topic: agent up, agent down, Telegram lost. It is not
+    an alert, so it carries no tier of its own -- INFO is priority 2, silent."""
+    when = now()
+    sink(Push(when, "SYSTEM", "INFO", title, body,
+              tag or f"system-{when:%Y%m%dT%H%M%S}", topic=SYSTEM_TOPIC))
+
+
+async def heartbeat(sink, minutes, status=lambda: ""):
+    """"The agent is still here", every `minutes`, until the process stops.
+
+    One tag for all of them, so the phone keeps one line rather than a column of
+    identical ones. Live only: `replay` has no wall clock to beat against.
+    """
+    while True:
+        await asyncio.sleep(minutes * 60)
+        system(sink, "Агент працює", status(), tag="system-heartbeat")
 
 
 class Recorder:
@@ -51,7 +80,7 @@ class Ntfy:
 
     def __call__(self, push):
         payload = {
-            "topic": self.topics[push.tier],
+            "topic": push.topic or self.topics[push.tier],
             "title": push.title,
             "message": push.body,
             "priority": SILENT if push.kind == "UPDATE" else PRIORITY[push.tier],

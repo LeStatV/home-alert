@@ -6,9 +6,12 @@ in `./data`.
 
 ## Prerequisites
 
-- Docker with compose, and a Telegram account that **has joined all six channels**:
-  Telegram only pushes updates for dialogs the account is in. A channel it cannot see
-  is logged at startup (`channel X: not joined`) and the other five keep working.
+- Docker with compose, and a Telegram account that **has joined all seven channels** --
+  the six in `profiles/` plus `@air_alert_ua`, which carries no profile and is read only
+  for the state of the Kyiv siren. Telegram only pushes updates for dialogs the account
+  is in. A channel it cannot see is logged at startup (`channel X: not joined`) and the
+  rest keep working; without `@air_alert_ua` every push reads `⚪ сирена невідома` and
+  the all-clear waits for a channel to say it is over.
 - API credentials from https://my.telegram.org -> API development tools.
 - `.env` next to `docker-compose.yml` (gitignored, never committed):
 
@@ -66,7 +69,10 @@ anonymous subscriber sees nothing.
 
 ## Checking it
 
-    docker compose logs -f agent      # "following 6/6 channels: ..." then the pushes
+    docker compose logs -f agent      # "following 7/7 channels: ..." then the pushes
+
+The `system` topic should show `Агент запущено` within seconds of the start, then
+`Агент працює` every `system.heartbeat_min` minutes (one entry, replaced in place).
 
 `home-alert replay <from> <to> --db data/home-alert.db` re-runs the rules over what
 was stored.
