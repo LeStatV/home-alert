@@ -209,7 +209,11 @@ def replay(messages, config, sink, store=None):
         # approach word (`підліт`, `захід`, `на Київ`) makes a place a missile's target.
         # a drone report is never a launch, however much it reads like one
         # ("1 Заворичі на вихід" names Київщина and matches the launch vocabulary)
-        launching = parse.is_launch or (missile and (parse.is_approach or parse.is_direction))
+        # `підліт`/`заліт` with no Kyiv place is a cruise missile approaching somebody
+        # else's city -- eleven of them in the corpus (Новий Буг, Оржиця, Козельщина).
+        # Only a bearing on Kyiv or a launch call with no target at all opens a WATCH.
+        launching = parse.is_launch or (missile and (parse.is_direction
+                                                     or (parse.is_approach and parse.places)))
         if (launching and (ballistic_context or missile or parse.places)
                 and (parse.names_ballistic or missile or not parse.is_drone)
                 and weights.get(message.channel, 0.0) >= LAUNCH_WEIGHT_MIN):
@@ -239,15 +243,17 @@ def replay(messages, config, sink, store=None):
             done(event)
             continue
 
-        # -- stage 3: trajectory -- bare place names while an event is live. The ballistic
-        # event takes them when both types are live: that is what BEHAVIOR.md measured on
-        # 19 Aug, where the bare places belonged to the ballistic waves. A missile pending
-        # is never promoted here -- a bare place is not an approach.
-        event = live.get("ballistic") or live.get("missile")
+        # -- stage 3: trajectory -- bare place names while the ballistic event is live.
+        # ponytail: a live *missile* event deliberately does not claim them. Its body
+        # then follows only the launch and approach calls, but on 19 Aug 22:33 a Калібр
+        # wave would otherwise have swallowed the bare `Нивки` reports for five minutes
+        # and cost the household its drone URGENT over the home set. The trade goes the
+        # other way when replace-in-place is actually wired up (notify.py).
+        event = live.get("ballistic")
         if (event and parse.places and parse.terse
                 and not parse.names_non_kyiv and not parse.is_drone and not parse.is_recon):
             event.fold(message, parse, parse.places)
-            if event.pending and event.type == "ballistic":
+            if event.pending:
                 event.pending = False
                 event.sounded = message.time
                 emit("PROMOTE", "URGENT", event.title, event.tag, event.count)
@@ -267,7 +273,7 @@ def replay(messages, config, sink, store=None):
         # cities we do not cover, recon flights and all-clears are stored, never pushed.
         drone_report = (threat_type == "drone" and parse.places and parse.terse
                         and not parse.names_non_kyiv and not parse.is_clear
-                        and not parse.is_recon and not missile)
+                        and not parse.is_recon)
         zone = rules.zone(parse.places, home, nearby) if drone_report else None
         if zone:
             tracked = {k: v for k, v in tracked.items()

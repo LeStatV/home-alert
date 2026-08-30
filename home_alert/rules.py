@@ -24,14 +24,17 @@ BALLISTIC = re.compile(r"баліст|балист|☄|іскандер|кинж
 # -- kpszsu says it of ballistics too, and it would swallow every ballistic wave.
 MISSILE = re.compile(r"циркон|онікс|оникс|бандерол|х-101|калібр|\bкр\b|крилат", re.I)
 # A Kyiv place plus one of these is "it is coming at us now" -> URGENT (SPEC story 11).
-# `захід` is the noun («Київ захід Цирконів»); `західним курсом` is a bearing, so \b.
-APPROACH = re.compile(r"підліт|над містом|\bзахід\b|заліт|на київ(?!щ|ськ)|на місто", re.I)
+# `захід` is the entry («Київ захід Цирконів», war_monitor); `курсом на захід` and
+# `західним курсом` are the compass, which is all the other 30 uses in the corpus.
+APPROACH = re.compile(r"підліт|над містом|(?<!на )(?<!курс )\bзахід\b|заліт"
+                      r"|на київ(?!щ|ськ)|на місто", re.I)
 # Only a bearing -> WATCH, never an immediate URGENT. The genitive `Києва` lives here and
 # not in the gazetteer, so `у напрямку Києва` can never promote a pending event by itself.
 DIRECTION = re.compile(r"(напрямк\w*|бік|сторону) (києв|київ)", re.I)
 # Kyiv-gating is on the target, not on every name in the message: a wave `на Київ повз
 # Прилуки, Ніжин` is ours; `Ціль на Ромни!` is somebody else's (SPEC story 12).
-KYIV_TARGET = re.compile(r"на київ(?!щ|ськ)|на місто|курс(ом)? на київ", re.I)
+# `на місто` is deliberately absent: war_monitor writes it of Dnipro too.
+KYIV_TARGET = re.compile(r"на київ(?!щ|ськ)|курс(ом)? на київ", re.I)
 # Ordinals a channel counts its own launches with: «Четверта», «П'ятий, шостий та сьомий»
 ORDINALS = [("перш", 1), ("друг", 2), ("трет", 3), ("четверт", 4), (r"п.?ят", 5),
             ("шост", 6), ("сьом", 7), ("восьм", 8), (r"дев.?ят", 9)]
