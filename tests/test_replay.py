@@ -1,10 +1,11 @@
 import json
+import re
 from datetime import datetime
 from unittest import mock
 
 from home_alert import notify
 from home_alert.notify import Push
-from harness import audible, replay, sounds
+from harness import audible, bodies, replay, sounds
 
 
 def test_21_aug_ballistic_launch_watch_then_urgent():
@@ -387,3 +388,58 @@ def test_20_aug_cruise_missiles_watch_on_direction_then_urgent_on_approach():
         ("02:26:37", "NEW", "WATCH", "Пуск ракет, ціль уточнюється"),
         ("02:27:40", "PROMOTE", "URGENT", "КРИЛАТІ РАКЕТИ на Київ"),
     ]
+
+
+def test_19_aug_zircon_wave_is_a_watch_then_an_urgent_with_the_count_it_was_given():
+    """19 Aug 20:55-21:04: while the ballistic waves are still coming, Zircons launch
+    from Курськ, Воронеж and Ростов. war_monitor's `Вихід другого Циркону, Курськ.`
+    names no target and opens a missile WATCH at 20:56:34; Ukrainian_Intelligence's
+    `5 Цирконів на Київ повз Прилуки, Ніжин та Пирятин` promotes it 66 s later --
+    a launch that transits three other oblasts but says Kyiv is the target.
+
+    The count is that channel's own figure, shown `>=5`, and it rises to `>=7` when
+    war_monitor says `П'ятий, шостий та сьомий` -- never the sum of the two (SPEC 23).
+    Before #5 every one of these pushed nothing at all: `5 Цирконів на Київ` was
+    suppressed by the oblasts it flew over, and the rest were silent body updates on
+    the ballistic notification.
+    """
+    zircons = [p for p in bodies("2026-08-19T20-50_21-16")
+               if p[3] in ("Пуск ракет, ціль уточнюється", "КРИЛАТІ РАКЕТИ на Київ")
+               and p[1] != "UPDATE"]
+    assert [p[:4] for p in zircons] == [
+        ("20:56:34", "NEW", "WATCH", "Пуск ракет, ціль уточнюється"),
+        ("20:57:40", "PROMOTE", "URGENT", "КРИЛАТІ РАКЕТИ на Київ"),
+        ("21:03:10", "RESOUND", "URGENT", "КРИЛАТІ РАКЕТИ на Київ"),
+    ]
+    assert zircons[1][4].startswith("≥5 ")
+    assert zircons[2][4].startswith("≥7 ")
+
+
+def test_19_aug_a_count_is_the_best_single_source_not_the_sum_of_five():
+    """Five channels report launches into the 19 Aug Kyiv ballistic event and each
+    counts the same missiles again: AerisRimor reaches `4 цілі`, kyiv_nebo `До 4 ракет`,
+    Ukrainian_Intelligence `Ще 2`, war_monitor `Перша ... Сьома` and then `8 та 9`.
+    Summing them is how the prototype printed `#48` for six missiles (BEHAVIOR.md
+    fix 2). The largest figure any one channel gave is war_monitor's 9, and no push
+    in the whole slice ever shows more than that.
+    """
+    shown = [int(re.match(r"≥(\d+)", p[4]).group(1))
+             for p in bodies("2026-08-19T20-50_21-16") if p[4].startswith("≥")]
+    assert shown, "expected counted pushes"
+    assert max(shown) == 9
+    reporting = {p[4].split(":")[0].split("· ")[-1] for p in bodies("2026-08-19T20-50_21-16")
+                 if p[3] == "БАЛІСТИКА на Київ"}
+    assert len(reporting) >= 5, reporting
+
+
+def test_19_aug_a_launch_on_another_city_neither_sounds_nor_changes_the_count():
+    """`Ціль на Ромни!` and `ЛУБНИ ЦІЛЬ!` arrive 40 s apart in the middle of a live
+    Kyiv ballistic event and a live Zircon event. They open a log-only event of their
+    own: no push at all, and the count on either Kyiv notification is the same one
+    push before them as one push after (SPEC story 12)."""
+    pushes = bodies("2026-08-19T20-50_21-16")
+    assert [p for p in pushes if p[0] in ("20:57:11", "20:57:12", "20:57:15")] == []
+    ballistic = [p for p in pushes if p[3] == "БАЛІСТИКА на Київ"]
+    before = [p for p in ballistic if p[0] < "20:57:11"][-1]
+    after = [p for p in ballistic if p[0] > "20:57:15"][0]
+    assert before[4].startswith("≥4 ") and after[4].startswith("≥4 ")

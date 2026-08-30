@@ -23,10 +23,20 @@ def replay(fixture, cooldown_min=None, **overrides):
     config = yaml.safe_load((ROOT / "config.yaml").read_text())
     config["ballistic"].update(overrides)
     config["drone"]["cooldown_min"].update(cooldown_min or {})
+    return [p[:4] for p in bodies(fixture, cooldown_min, **overrides)]
+
+
+def bodies(fixture, cooldown_min=None, **overrides):
+    """The same pushes as `replay`, plus the body -- where the `>=N` count is shown.
+    Titles are asserted exactly; a body is matched loosely, by what it contains."""
+    config = yaml.safe_load((ROOT / "config.yaml").read_text())
+    config["ballistic"].update(overrides)
+    config["drone"]["cooldown_min"].update(cooldown_min or {})
     recorder = notify.Recorder()
     events.replay(reader.read_corpus(FIXTURES / f"{fixture}.jsonl"), config,
                   recorder, store.Store(":memory:"))
-    return [(f"{p.time:%H:%M:%S}", p.kind, p.tier, p.title) for p in recorder.pushes]
+    return [(f"{p.time:%H:%M:%S}", p.kind, p.tier, p.title, p.body)
+            for p in recorder.pushes]
 
 
 def sounds(fixture, **overrides):
