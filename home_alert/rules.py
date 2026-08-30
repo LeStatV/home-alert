@@ -123,12 +123,20 @@ class Parse:
 
 
 def places(text, profile=None):
-    """Canonical Kyiv-area names this text mentions: the global gazetteer above, plus
-    whatever spellings one channel alone uses (`profiles/<channel>.yaml: place_aliases`).
+    """Canonical Kyiv-area names this text mentions, in the order the text names them:
+    the global gazetteer above, plus whatever spellings one channel alone uses
+    (`profiles/<channel>.yaml: place_aliases`).
+
+    Reading order is the chain the drone flew -- `Оболонь - Нивки` is from Оболонь to
+    Нивки -- and #8 prints it in the notification body. Nothing else reads the order.
     """
     stems = PLACES | (profile.aliases if profile else {})
-    return tuple(sorted({name for stem, name in stems.items()
-                         if re.search(stem, text, re.I)}))
+    at = {}
+    for stem, name in stems.items():
+        found = re.search(stem, text, re.I)
+        if found and found.start() < at.get(name, len(text) + 1):
+            at[name] = found.start()
+    return tuple(sorted(at, key=at.get))
 
 
 # Ordinals a channel counts its own launches with: «Четверта», «П'ятий, шостий та сьомий»

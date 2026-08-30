@@ -489,3 +489,47 @@ def test_19_aug_the_evening_essay_never_declares_a_threat():
     surveys. It is an essay, not a report -- before it was filtered it pushed an INFO
     `Загроза балістики` three times in the corpus (story 22)."""
     assert replay("2026-08-19T18-11_18-20") == []
+
+
+def test_the_kyiv_siren_is_a_signal_in_every_push_and_never_a_gate():
+    """SYNTHETIC fixture -- the corpus has no `@air_alert_ua` file, so the siren feed
+    cannot come from it. Wording follows the channel's own two lines, a region hashtag
+    and a state (`🔴 #м_Київ / Повітряна тривога!`, `🟢 #м_Київ / Відбій тривоги!`).
+
+    The siren feed carries no profile and no weight: it is read for one bit, the state
+    of the siren in м. Київ, which every push then shows (SPEC story 24). Kharkiv's
+    siren is not ours and moves nothing. And the bit never gates a tier -- the drone
+    over the home set is URGENT under a live siren and URGENT after the all-clear.
+    """
+    pushes = bodies("synthetic-siren-signal")
+    assert [p[:4] for p in pushes] == [
+        ("04:00:30", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("04:05:00", "UPDATE", "URGENT", "БпЛА НАД ДОМОМ"),
+    ]
+    assert "🔴" in pushes[0][4], pushes[0][4]
+    assert "🟢" in pushes[1][4], pushes[1][4]
+
+
+def test_28_aug_the_body_carries_the_chain_its_sources_and_the_age_of_the_report():
+    """SPEC story 9, on the 05:09 pass of the corpus's worst night. AerisRimor opens the
+    home event with `2 реактива Оболонь - Нивки київ.` and nebo_raketa's bare `Нивки`
+    41 s later promotes it; the body of that one notification carries the chain the
+    drone has flown, both channels that reported it, when the last report came in, the
+    official siren and how many of the six channels are still talking.
+
+    The full loop of AC 1, `Оболонь → Нивки → Вишневе`, spans two notifications and not
+    one: the event key is the zone (#4), Нивки is the home set and Вишневе is neither
+    home nor ring, so war_monitor's `через Оболонь у напрямку Вишневе` six seconds
+    earlier updates the Kyiv-wide INFO instead. Each body shows its own places.
+    """
+    pushes = bodies("2026-08-28T00-30_08-00")
+    home = [p for p in pushes if p[0] == "05:10:18"][0]
+    assert home[:4] == ("05:10:18", "PROMOTE", "URGENT", "БпЛА НАД ДОМОМ")
+    assert "Оболонь → Нивки" in home[4], home[4]
+    assert "AerisRimor" in home[4] and "nebo_raketa" in home[4], home[4]
+    assert "звіт 05:10:18 (щойно)" in home[4], home[4]
+    assert re.search(r"\b[1-6]/6 каналів активні", home[4]), home[4]
+
+    kyiv = [p for p in pushes if p[0] == "05:10:12"][0]
+    assert kyiv[:4] == ("05:10:12", "UPDATE", "INFO", "БпЛА над Києвом")
+    assert "Оболонь → Вишневе" in kyiv[4], kyiv[4]

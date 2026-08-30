@@ -19,6 +19,7 @@ class Push:
     title: str
     body: str
     tag: str        # stable per event, so ntfy replaces the entry in place
+    source: str = ""   # t.me link to the post behind it -- the "view source" action
 
 
 class Recorder:

@@ -6,6 +6,7 @@ They share nothing but the message stream -- separate event keys, separate tags,
 separate sounds -- so a drone over Нивки can never mute a ballistic launch on Kyiv.
 The clock is the message timestamps, so `replay` and the live path run identical code.
 """
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
@@ -36,6 +37,20 @@ ECHO = timedelta(seconds=15)             # an aggregator restating another chann
 PARTIAL = 0.5                            # ...counts half. It is not a second pair of eyes.
 URGENT_CONFIDENCE = 0.8                  # noisy-OR bar for waking the house
 
+# -- the official siren feed. Read for one bit and never as a gate (ADR 17): is the
+# siren sounding in м. Київ? @air_alert_ua posts one region per message, a hashtag and
+# a state; the oblast (`#Київська_область`) is a different siren and not ours.
+SIREN_CHANNEL = "air_alert_ua"
+SIREN_KYIV = re.compile(r"м[._ ]?київ", re.I)
+SIREN_ON = re.compile(r"повітряна тривога", re.I)
+SIREN_OFF = re.compile(r"відбій тривоги", re.I)
+SIREN_LABEL = {True: "🔴 тривога", False: "🟢 відбій", None: "⚪ сирена невідома"}
+
+# A channel that has posted this recently is one of the `N/6 каналів активні` the body
+# shows; the number is the household's own measure of how much to trust a lone report.
+ACTIVE_WINDOW = timedelta(minutes=30)
+CHAIN = 6                # places shown in the body; a night-long event names dozens
+
 DRONE_TITLES = {
     ("HOME", "URGENT"): "БпЛА НАД ДОМОМ",
     ("HOME", "WATCH"): "БпЛА над домом — одне джерело",
@@ -55,8 +70,9 @@ class Event:
     sounded: datetime        # last push that made a noise
     pending: bool            # a launch whose target has not been named yet
     launches: int = 1
-    places: set = field(default_factory=set)
-    sources: set = field(default_factory=set)
+    last: datetime = None    # last report of any kind -- the body shows its age
+    places: list = field(default_factory=list)   # in the order they were reported
+    sources: list = field(default_factory=list)
     counts: dict = field(default_factory=dict)   # channel -> its own largest figure
     last_text: str = ""      # the last launch call folded in, verbatim
 
@@ -83,9 +99,13 @@ class Event:
         return max(self.counts.values(), default=0)
 
     def fold(self, message, parse, target):
-        self.places |= set(target)
-        self.sources.add(message.channel)
+        for place in target:
+            if place not in self.places:
+                self.places.append(place)
+        if message.channel not in self.sources:
+            self.sources.append(message.channel)
         self.counts[message.channel] = max(self.counts.get(message.channel, 0), parse.count)
+        self.last = message.time
 
 
 @dataclass
@@ -96,7 +116,7 @@ class Drone:
     opened: datetime
     last: datetime            # a zone falls quiet for DRONE_WINDOW and the event closes
     weights: dict = field(default_factory=dict)   # channel -> its best contribution here
-    places: set = field(default_factory=set)
+    places: list = field(default_factory=list)    # in the order they were reported
     chained: bool = False     # a channel followed its own reply chain into this zone
     echo: tuple = None        # (time, places, channel) of the last report folded in
 
@@ -127,6 +147,10 @@ class Drone:
     def tag(self):
         return f"drone-{self.zone.lower()}-{self.opened:%Y%m%dT%H%M%S}"
 
+    @property
+    def sources(self):
+        return tuple(self.weights)      # insertion-ordered: who reported it, first first
+
     def report(self, message, named, weight, chained):
         """Fold one report in. A channel restating within `ECHO` what another channel
         just said, naming no place of its own, is half a source -- the aggregator echo
@@ -137,7 +161,9 @@ class Drone:
         contribution = weight * PARTIAL if echoing else weight
         self.weights[message.channel] = max(self.weights.get(message.channel, 0.0),
                                             contribution)
-        self.places |= set(named)
+        for place in named:
+            if place not in self.places:
+                self.places.append(place)
         self.chained |= chained
         self.echo = (message.time, set(named), message.channel)
         self.last = message.time
@@ -158,12 +184,36 @@ class Pipeline:
                          for tier, minutes in config["drone"]["cooldown_min"].items()}
         self.sink, self.store = sink, store
 
+        self.siren = None         # the official siren in м. Київ: on, off, or unknown
+        self.last_post = {}       # channel -> when it last posted anything at all
         self.live = {}            # event type -> the one live event of that type
         self.threat_until = None
         self.context = Context()
         self.drones = {}          # zone -> the live Drone event there
         self.sounded = {}         # (zone, tier) -> when it last made a noise
         self.tracked = {}         # (channel, msg id) -> (time, zone) of a drone report
+
+    def tail(self, when, places, sources, last):
+        """The body under the message itself: the chain the event has travelled, who
+        reported it and how long ago, the official siren, and how many channels are
+        still talking (SPEC story 9). Everything the household needs to judge it.
+        """
+        chain = [" → ".join(places[-CHAIN:])] if places else []
+        age = when - last
+        ago = ("щойно" if age < timedelta(minutes=1)
+               else f"{int(age.total_seconds() // 60)} хв тому")
+        return chain + [
+            f"джерела: {', '.join(sources)} · звіт {last:%H:%M:%S} ({ago})",
+            f"{SIREN_LABEL[self.siren]} · {self.active(when)}/{len(self.channels)}"
+            " каналів активні",
+        ]
+
+    def active(self, when):
+        """How many channels have posted anything at all lately -- plain recency, the
+        `N/6` the household reads as "how many pairs of eyes are open right now".
+        Whether a gap is expected is a different question, and only the silent-while-
+        siren warning asks it."""
+        return sum(1 for last in self.last_post.values() if when - last <= ACTIVE_WINDOW)
 
     def feed(self, message):
         """One message in, whatever it is worth in pushes out.
@@ -179,17 +229,34 @@ class Pipeline:
             if self.store:
                 self.store.record_edit(message)
             return
+        text = " ".join(message.text.split())
+        if message.channel == SIREN_CHANNEL:
+            # The one channel with no profile and no weight. It classifies nothing and
+            # scores nothing; it flips one bit that every push then shows.
+            if SIREN_KYIV.search(text):
+                if SIREN_ON.search(text):
+                    self.siren = True
+                elif SIREN_OFF.search(text):
+                    self.siren = False
+            if self.store:
+                self.store.record(message, rules.classify(text), None, [])
+            return
         profile = self.channels.get(message.channel)
         if profile is None:      # no profile, no channel: the files are the channel list
             return
-        text = " ".join(message.text.split())
+        self.last_post[message.channel] = message.time     # even an ad proves it is alive
         parse = rules.classify(text, profile)
         pushes = []
 
-        def emit(kind, tier, title, tag, count=0):
+        def emit(kind, tier, title, tag, count=0, event=None):
             shown = f"≥{count} · " if count >= 2 else ""
-            push = Push(message.time, kind, tier, title,
-                        f"{shown}{message.channel}: {text[:120]}", tag)
+            lines = [f"{shown}{message.channel}: {text[:120]}"]
+            lines += self.tail(message.time,
+                               event.places if event else parse.places,
+                               event.sources if event else (message.channel,),
+                               (event.last if event else None) or message.time)
+            push = Push(message.time, kind, tier, title, "\n".join(lines), tag,
+                        source=f"https://t.me/{message.channel}/{message.id}")
             self.sink(push)
             pushes.append(push)
 
@@ -271,7 +338,7 @@ class Pipeline:
             event.fold(message, parse, target)
             event.last_text = text
             if etype != "other":
-                emit(kind, event.tier, event.title, event.tag, event.count)
+                emit(kind, event.tier, event.title, event.tag, event.count, event)
             done(event)
             return
 
@@ -288,15 +355,15 @@ class Pipeline:
             if event.pending:
                 event.pending = False
                 event.sounded = message.time
-                emit("PROMOTE", "URGENT", event.title, event.tag, event.count)
+                emit("PROMOTE", "URGENT", event.title, event.tag, event.count, event)
             else:
-                emit("UPDATE", event.tier, event.title, event.tag, event.count)
+                emit("UPDATE", event.tier, event.title, event.tag, event.count, event)
             done(event)
             return
 
         # -- stage 4: impact / all-clear -- body update only, never a sound
         if event and parse.is_clear:
-            emit("UPDATE", event.tier, event.title, event.tag, event.count)
+            emit("UPDATE", event.tier, event.title, event.tag, event.count, event)
             done(event)
             return
 
@@ -335,7 +402,7 @@ class Pipeline:
                 kind = "UPDATE"
             if kind != "UPDATE":
                 self.sounded[(zone, drone.tier)] = message.time
-            emit(kind, drone.tier, drone.title, drone.tag)
+            emit(kind, drone.tier, drone.title, drone.tag, event=drone)
             # ponytail: drone events have no row of their own yet, so record no event
             # rather than the unrelated live ballistic one -- a notifications-to-events
             # join would otherwise credit these pushes to it. Every message and every

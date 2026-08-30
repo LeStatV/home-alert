@@ -18,7 +18,8 @@ examples:
     # 42733, 2026-08-19T20:52:44 -- `Києва` is deliberately not a place: a bearing on
     # Kyiv opens a WATCH, it never promotes one to URGENT by itself
   - {text: "‼️Київ /Бровари — спуск балістики! Друга", type: ballistic, stage: launch,
-     places: [Бровари, Київ], count: 2}   # 42736, 2026-08-19T20:54:08 -- ordinal count
+     places: [Київ, Бровари], count: 2}   # 42736, 2026-08-19T20:54:08 -- ordinal count
+    # places are in the order the message names them: #8 prints that chain in the body
   - {text: "🅿️3х реактива у напрямку Бровари.", type: drone, stage: trajectory,
      places: [Бровари], count: 3}         # 42711, 2026-08-18T15:29:56 -- 🅿️ house style
   - {text: "💥 Вибухи у Броварах.", type: null, stage: clear, places: [Бровари]}
