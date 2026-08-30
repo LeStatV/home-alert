@@ -49,7 +49,14 @@ SIREN_LABEL = {True: "🔴 тривога", False: "🟢 відбій", None: "�
 # A channel that has posted this recently is one of the `N/6 каналів активні` the body
 # shows; the number is the household's own measure of how much to trust a lone report.
 ACTIVE_WINDOW = timedelta(minutes=30)
+# The corridor signal: this long without a report over the house or in the ring, and
+# somebody saying it is over, and the household is told it can come out (ADR 10).
+ALL_CLEAR_QUIET = timedelta(minutes=10)
 CHAIN = 6                # places shown in the body; a night-long event names dozens
+
+# The all-clear is titled by zone, not by the event's tier: "Відбій — БпЛА над домом"
+# is what the household is waiting to read, whether the pass was an URGENT or a WATCH.
+ALL_CLEAR_TITLES = {"HOME": "Відбій — БпЛА над домом", "NEARBY": "Відбій — БпЛА поруч"}
 
 DRONE_TITLES = {
     ("HOME", "URGENT"): "БпЛА НАД ДОМОМ",
@@ -185,6 +192,9 @@ class Pipeline:
         self.sink, self.store = sink, store
 
         self.siren = None         # the official siren in м. Київ: on, off, or unknown
+        self.siren_off = None     # when it last ended -- half of the all-clear condition
+        self.cleared_at = None    # when a channel last said it was over -- the other half
+        self.last_near = None     # last report over the house or in the ring
         self.last_post = {}       # channel -> when it last posted anything at all
         self.live = {}            # event type -> the one live event of that type
         self.threat_until = None
@@ -207,6 +217,37 @@ class Pipeline:
             f"{SIREN_LABEL[self.siren]} · {self.active(when)}/{len(self.channels)}"
             " каналів активні",
         ]
+
+    def stand_down(self, when):
+        """The all-clear, and the pushes it sends: one silent INFO per live event over
+        the house or in the ring, once both halves of ADR 10 hold -- ten minutes with
+        no report from either set, AND somebody saying it is over, a channel's own
+        clear call or the official siren ending. Quiet alone is not an all-clear: a
+        drone that stops being reported may only have stopped being seen.
+
+        ponytail: arrival-driven, like everything else in this file -- the condition is
+        tested on each incoming message, so the all-clear lands on the first message
+        after the ten minutes are up, not on the second they elapse. The siren feed
+        alone posts nationwide every few minutes, so live that is seconds; if every
+        channel goes dark at once the all-clear waits, which is the honest answer.
+        """
+        said = max([when for when in (self.cleared_at, self.siren_off) if when],
+                   default=None)
+        if (self.last_near is None or when - self.last_near < ALL_CLEAR_QUIET
+                or said is None or said < self.last_near):
+            return []
+        sent = []
+        for zone in ("HOME", "NEARBY"):
+            drone = self.drones.pop(zone, None)
+            if drone is None:
+                continue
+            push = Push(when, "CLEAR", "INFO", ALL_CLEAR_TITLES[zone],
+                        "\n".join(self.tail(when, drone.places, drone.sources,
+                                            drone.last)),
+                        drone.tag)
+            self.sink(push)
+            sent.append(push)
+        return sent
 
     def active(self, when):
         """How many channels have posted anything at all lately -- plain recency, the
@@ -237,16 +278,21 @@ class Pipeline:
                 if SIREN_ON.search(text):
                     self.siren = True
                 elif SIREN_OFF.search(text):
+                    if self.siren:
+                        self.siren_off = message.time
                     self.siren = False
+            cleared = self.stand_down(message.time)
             if self.store:
-                self.store.record(message, rules.classify(text), None, [])
+                self.store.record(message, rules.classify(text), None, cleared)
             return
         profile = self.channels.get(message.channel)
         if profile is None:      # no profile, no channel: the files are the channel list
             return
         self.last_post[message.channel] = message.time     # even an ad proves it is alive
         parse = rules.classify(text, profile)
-        pushes = []
+        if parse.is_clear:
+            self.cleared_at = message.time
+        pushes = self.stand_down(message.time)
 
         def emit(kind, tier, title, tag, count=0, event=None):
             shown = f"≥{count} · " if count >= 2 else ""
@@ -384,6 +430,8 @@ class Pipeline:
             chained = bool(parent) and parent[1] != zone
             self.tracked[(message.channel, message.id)] = (message.time, zone)
 
+            if zone != "KYIV":
+                self.last_near = message.time
             drone = self.drones.get(zone)
             fresh = drone is None or message.time - drone.last > DRONE_WINDOW
             if fresh:

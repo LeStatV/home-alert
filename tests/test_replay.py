@@ -569,3 +569,33 @@ def test_the_ntfy_boundary_replaces_the_live_notification_and_links_the_source()
     assert first["actions"] == [{"action": "view", "label": "Джерело",
                                  "url": "https://t.me/AerisRimor/12345"}]
     assert "actions" not in update      # nothing to link: no source, no button
+
+
+def test_the_all_clear_is_one_silent_info_after_ten_quiet_minutes_and_a_clear_call():
+    """SYNTHETIC fixture -- the household's own corridor signal, and the corpus has no
+    slice that puts a home pass, a clear call and ten quiet minutes in one window.
+    Wording is verbatim (war_monitor's `Київ: 🅿️ 1х реактив <place>` template,
+    AerisRimor's `Чисто.`, war_monitor's oblast drone line).
+
+    A drone over the home set wakes the house at 02:00. AerisRimor says it is clear a
+    minute later, then nothing touches the home set or the ring for ten minutes: the
+    household gets one silent INFO telling it to come out of the corridor (story 8),
+    and only one -- the next message does not repeat it.
+    """
+    assert replay("synthetic-all-clear-after-quiet") == [
+        ("02:00:00", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("02:12:00", "CLEAR", "INFO", "Відбій — БпЛА над домом"),
+    ]
+
+
+def test_quiet_alone_is_never_an_all_clear():
+    """SYNTHETIC fixture. The same night without the clear call: eleven quiet minutes
+    pass with the Kyiv siren still sounding and no all-clear is sent -- a drone that
+    stops being reported may just have stopped being seen (ADR 10). The official siren
+    ending is the other half of the AND, and it releases the all-clear on the first
+    message after it.
+    """
+    assert replay("synthetic-all-clear-needs-more-than-quiet") == [
+        ("03:00:30", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("03:13:00", "CLEAR", "INFO", "Відбій — БпЛА над домом"),
+    ]
