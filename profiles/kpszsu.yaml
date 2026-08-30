@@ -1,0 +1,22 @@
+channel: kpszsu
+title: "Повітряні Сили ЗСУ"
+weight: 1.0              # the official anchor; on 22 Aug only it and war_monitor
+                         # reported the actual launch
+language: uk
+threads_by_reply: false  # 5% replies, and never to thread one target
+
+noise_patterns:
+  # the morning digest of what the air force shot down overnight: 15 in the corpus
+  # (22 Aug 06:10:34 `⚡️ ЗБИТО/ПОДАВЛЕНО 191 ЦІЛЬ ПРОТИВНИКА`). The slash is what keeps
+  # this narrow: it appears only in digest headers, never in a mid-raid post, so a bare
+  # `збито` elsewhere is left to the global vocabulary to read.
+  - 'збито\s*/\s*подавлено'
+
+examples:
+  - {text: "🚀 Балістичні ракети на Київ з півночі.", type: ballistic, stage: launch,
+     places: [Київ]}          # 73457, 2026-08-19T20:53:35 -- 70 s after the monitors
+  - {text: "🛵 Реактивний БпЛА через Тернопільщину ➡️ у напрямку Дубно.", type: drone,
+     stage: null, places: []} # 73352, 2026-08-18T15:28:34 -- the official channel covers
+                              # the whole country; nothing here is ours
+  - {text: "⚡️ ЗБИТО/ПОДАВЛЕНО 191 ЦІЛЬ ПРОТИВНИКА", noise: true}
+    # 73939, 2026-08-22T06:10:34 -- first line of the morning digest

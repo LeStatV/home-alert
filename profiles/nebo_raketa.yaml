@@ -1,0 +1,20 @@
+channel: nebo_raketa
+title: "Небо ракета"
+weight: 0.8
+language: uk
+threads_by_reply: true   # 50% of posts are replies -- the most threaded channel
+
+noise_patterns:
+  # its retelling of the air force digest, same category, one in the corpus
+  # (20 Aug 06:45:05 `⚡️186 цілей збито/подавлено за ніч`)
+  - 'збито\s*/\s*подавлено'
+
+examples:
+  - {text: "🚀 Ціль!", type: ballistic, stage: launch, places: []}   # 38242, 2026-08-19T20:52:35
+  - {text: "🚀 Пуск", type: ballistic, stage: launch, places: []}     # 38265, 2026-08-19T21:05:57
+  - {text: "По попередній балістиці мінус, залишились 4 Циркони!", type: missile,
+     stage: clear, count: 4}   # 38251, 2026-08-19T20:57:03 -- one wave ends, another does not
+  - {text: "❗️Впродовж години усім рекомендую слідкувати за Лівим Берегом — @kyiv",
+     noise: true}              # 38423, 2026-08-21T22:06:06 -- cross-promotion mid-raid
+  - {text: "⚡️186 цілей збито/подавлено за ніч: рф застосувала десятки ракет і понад 160 дронів, — Повітряні сили",
+     noise: true}              # 38338, 2026-08-20T06:45:05 -- the air force digest, retold

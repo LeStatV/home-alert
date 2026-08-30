@@ -1,0 +1,31 @@
+channel: AerisRimor
+title: "AerisRimor"
+weight: 0.7
+language: uk
+threads_by_reply: true   # 34% of posts are replies; terse bursts inside a chain
+
+noise_patterns:
+  # `🎩Зведення станом на 22:05` / `🎩Варто проговорити` -- its evening briefings, up to
+  # 2.2k characters (7 in the corpus), and its end-of-day digest (27 Aug 16:44:19)
+  - '^🎩'
+  - 'збито\s*/\s*подавлено'
+
+examples:
+  - {text: "ЦІЛЬ", type: ballistic, stage: launch, places: []}
+    # 79960, 2026-08-19T20:52:28 -- the whole message; the target arrives seconds later
+  - {text: "КИЇВ", type: null, stage: trajectory, places: [Київ]}
+    # 79961, 2026-08-19T20:52:32 -- and this is it. Type comes from the burst, not the text
+  - {text: "АНТОНОВ/Коцюба!!", type: null, stage: trajectory, places: [Антонов, Коцюбинське]}
+    # 79970, 2026-08-19T20:53:57 -- the home set, named the way this channel names it
+  - {text: "Троя КР залітає!", type: missile, stage: launch, places: [Троєщина]}
+    # 80198, 2026-08-20T02:28:57 -- `Троя` is Троєщина, `КР` is a cruise missile
+  - {text: "Ціль над Курщиною!", type: ballistic, stage: launch, places: []}
+    # 79980, 2026-08-19T20:55:45 -- a launch on somebody else's oblast: no Kyiv place,
+    # and `events.py` gives it a log-only event of its own (story 12)
+  - {text: "Зникли.", type: null, stage: clear, places: []}   # 80006, 2026-08-19T21:04:59
+  - {text: "🎩Зведення станом на 22:05.", noise: true}
+    # 79947, 2026-08-19T19:06:01 -- first line of a 2.2k-char evening briefing
+
+# place_aliases: none. This channel's spellings -- `анонов`, `Троя`, `ГОЛОС`, `Коцюба` --
+# are household geometry, not channel style: any channel can typo Антонов, and a missed
+# home place is the one failure that matters, so they stay in the global gazetteer.

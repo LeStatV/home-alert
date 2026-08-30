@@ -9,7 +9,7 @@ The clock is the message timestamps, so `replay` and the live path run identical
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
-from . import rules
+from . import profiles, rules
 from .context import Context
 from .notify import Push
 
@@ -145,10 +145,9 @@ class Drone:
 
 def replay(messages, config, sink, store=None):
     """Feed messages through the rules and push what the household would have seen."""
-    weights = config["channels"]
+    channels = profiles.load(config["profiles"])
     resound_gap = timedelta(minutes=config["ballistic"]["resound_gap_min"])
     home, nearby = set(config["home"]), set(config["nearby"])
-    default_type = config.get("default_type", {})
     cooldown = {tier: timedelta(minutes=minutes)
                 for tier, minutes in config["drone"]["cooldown_min"].items()}
 
@@ -160,8 +159,11 @@ def replay(messages, config, sink, store=None):
     tracked = {}         # (channel, msg id) -> (time, zone) of a drone report
 
     for message in messages:
+        profile = channels.get(message.channel)
+        if profile is None:      # no profile, no channel: the files are the channel list
+            continue
         text = " ".join(message.text.split())
-        parse = rules.classify(text)
+        parse = rules.classify(text, profile)
         pushes = []
 
         def emit(kind, tier, title, tag, count=0):
@@ -185,7 +187,7 @@ def replay(messages, config, sink, store=None):
             done()
             continue
         parse = in_context
-        threat_type = threat_type or default_type.get(message.channel)
+        threat_type = threat_type or profile.default_type
 
         # the message clock closes stale events and expires unconfirmed launches
         for etype, stale in list(live.items()):
@@ -207,7 +209,7 @@ def replay(messages, config, sink, store=None):
                              or (threat_until is not None and message.time <= threat_until))
         # a cruise missile says so in its own words. war_monitor's `Nx ...` house style is
         # not a drone marker: 54 of those posts are KP, KAB and PRR (issue #4 note).
-        missile = parse.names_missile and not parse.is_drone
+        missile = rules.type_of(parse) == "missile"
 
         # -- stage 2: launch. Three ways a cruise wave becomes ours: a bearing that says
         # Kyiv (`у напрямку Києва` -- a WATCH, never an immediate URGENT), an approach
@@ -216,11 +218,10 @@ def replay(messages, config, sink, store=None):
         # city: eleven of those in the corpus (Новий Буг, Оржиця, Козельщина, Канів).
         # A drone report is never a launch, however much it reads like one
         # ("1 Заворичі на вихід" names Київщина and matches the launch vocabulary).
-        launching = parse.is_launch or (missile and (parse.is_direction
-                                                     or (parse.is_approach and parse.places)))
+        launching = rules.stage(parse) == "launch"
         if (launching and (ballistic_context or missile or parse.places)
                 and (parse.names_ballistic or missile or not parse.is_drone)
-                and weights.get(message.channel, 0.0) >= LAUNCH_WEIGHT_MIN):
+                and profile.weight >= LAUNCH_WEIGHT_MIN):
             etype = "missile" if missile else "ballistic"
             # gating is on the target, not on every name: `на Київ повз Прилуки, Ніжин`
             # and `повз Ічню у напрямку Київщини` are ours, `Ціль на Ромни!` is a
@@ -300,7 +301,7 @@ def replay(messages, config, sink, store=None):
             if fresh:
                 drone = drones[zone] = Drone(zone, message.time, message.time)
             was = drone.tier
-            drone.report(message, parse.places, weights.get(message.channel, 0.0), chained)
+            drone.report(message, parse.places, profile.weight, chained)
 
             kind = "NEW" if fresh else "PROMOTE" if drone.tier != was else "UPDATE"
             # The cooldown gates the sound, not the notification: a gated NEW still goes

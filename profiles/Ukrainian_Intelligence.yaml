@@ -1,0 +1,19 @@
+channel: Ukrainian_Intelligence
+title: "Розвідка України"
+weight: 0.6
+language: uk
+threads_by_reply: true   # 33% of posts are replies
+
+examples:
+  - {text: "Балістика на Київ!", type: ballistic, stage: launch, places: [Київ]}
+    # 144457, 2026-08-19T20:52:25 -- the first launch message of the corpus's worst raid
+  - {text: "КИЇВ ЦІЛЬ", type: ballistic, stage: launch, places: [Київ]}   # 144921, 2026-08-22T08:39:50
+  - {text: "Ще 2 балістики на Бровари!", type: ballistic, stage: launch,
+     places: [Бровари], count: 2}                                        # 144505, 2026-08-19T21:11:50
+  - {text: "Ціль на Ромни!", type: ballistic, stage: launch, places: []}  # 144474, 2026-08-19T20:57:11
+  - {text: "‼️ Загроза балістики з Курська ✅Розвідка України | Чатик | Підтримати",
+     type: ballistic, stage: threat, noise: false}
+    # 146121, 2026-08-28T19:25:43 (the blank line collapses before classification).
+    # This channel appends a donation footer to real reports, so the ads vocabulary must
+    # never drop a message that says `баліст` -- that exemption is why the essay and
+    # digest patterns live in the profiles instead.

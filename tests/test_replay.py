@@ -481,3 +481,11 @@ def test_21_aug_a_bearing_on_kyiv_survives_the_oblasts_the_wave_crosses():
     assert replay("2026-08-21T23-35_23-45") == [
         ("23:39:15", "NEW", "WATCH", "Пуск ракет, ціль уточнюється"),
     ]
+
+
+def test_19_aug_the_evening_essay_never_declares_a_threat():
+    """19 Aug 18:11-18:20: war_monitor's nightly `Загальна оцінка загроз ... на ніч`
+    briefing runs to 1.5k characters and mentions ballistics among everything else it
+    surveys. It is an essay, not a report -- before it was filtered it pushed an INFO
+    `Загроза балістики` three times in the corpus (story 22)."""
+    assert replay("2026-08-19T18-11_18-20") == []

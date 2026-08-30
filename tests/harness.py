@@ -27,6 +27,7 @@ def bodies(fixture, cooldown_min=None, **overrides):
     """The same pushes as `replay`, plus the body -- where the `>=N` count is shown.
     Titles are asserted exactly; a body is matched loosely, by what it contains."""
     config = yaml.safe_load((ROOT / "config.yaml").read_text())
+    config["profiles"] = ROOT / "profiles"
     config["ballistic"].update(overrides)
     config["drone"]["cooldown_min"].update(cooldown_min or {})
     recorder = notify.Recorder()

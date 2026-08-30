@@ -1,18 +1,9 @@
 # home-alert configuration. Secrets come from the environment, never from here.
 
 corpus: research/samples-2026-08-30   # replay source (dir of <channel>.jsonl)
-
-channels:            # trust weight per channel
-  kpszsu: 1.0
-  war_monitor: 0.9
-  nebo_raketa: 0.8
-  AerisRimor: 0.7
-  Ukrainian_Intelligence: 0.6
-  kyiv_nebo: 0.6
-
-default_type:        # a bare place-name post from these channels is this type.
-  kyiv_nebo: drone   # 88% of its posts carry no type word (channel-eval-kyiv_nebo.md);
-                     # moves into the channel profile when #6 introduces them.
+profiles: profiles   # dir of <channel>.yaml -- weights, vocabulary, noise, examples.
+                     # A channel with no profile here is not read: these files *are*
+                     # the channel list.
 
 # Geometry is named sets, no coordinates (ADR 6). Names are the canonical ones the
 # gazetteer in rules.py produces -- aliases and typos (`анонов`, `файна таун`,

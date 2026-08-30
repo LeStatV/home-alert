@@ -1,0 +1,27 @@
+channel: war_monitor
+title: "War Monitor"
+weight: 0.9              # ARCHITECTURE #2; >=0.8, so a drone it puts over the house
+                         # wakes the household on its word alone
+language: uk
+threads_by_reply: true   # 14% of posts are replies, and it bumps its own launch calls
+
+noise_patterns:
+  # its nightly briefing: 1.5k characters surveying every threat to the whole country,
+  # ballistics among them. Four in the corpus (19 Aug 18:16:19 is one), and before this
+  # three of them pushed an INFO `Загроза балістики` at the household (story 22).
+  - '^загальна оцінка загроз'
+
+# Every example is a test (tests/test_profiles.py). Texts are verbatim corpus messages,
+# cited by id and UTC date; a long one is cut at the line the pattern anchors on.
+examples:
+  - {text: "☄ Вихід у напрямку Києва", type: ballistic, stage: launch, places: []}
+    # 42733, 2026-08-19T20:52:44 -- `Києва` is deliberately not a place: a bearing on
+    # Kyiv opens a WATCH, it never promotes one to URGENT by itself
+  - {text: "‼️Київ /Бровари — спуск балістики! Друга", type: ballistic, stage: launch,
+     places: [Бровари, Київ], count: 2}   # 42736, 2026-08-19T20:54:08 -- ordinal count
+  - {text: "🅿️3х реактива у напрямку Бровари.", type: drone, stage: trajectory,
+     places: [Бровари], count: 3}         # 42711, 2026-08-18T15:29:56 -- 🅿️ house style
+  - {text: "💥 Вибухи у Броварах.", type: null, stage: clear, places: [Бровари]}
+    # 42856, 2026-08-21T22:11:04 -- an impact report names no type of its own
+  - {text: "Загальна оцінка загроз для України на ніч 19 серпня.", noise: true}
+    # 42729, 2026-08-19T18:16:19 -- first line of the 1.5k-char nightly briefing
