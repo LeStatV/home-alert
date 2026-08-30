@@ -1,6 +1,6 @@
 # Spec: home-alert v1 — Telegram-monitored air-threat notifier for a Kyiv household
 
-Triage: `ready-for-agent` (to be applied when published to the issue tracker — no tracker configured in this session; run `/setup-matt-pocock-skills`).
+Published as https://github.com/LeStatV/home-alert/issues/1 (label `ready-for-agent`). The issue is the canonical copy; this file mirrors it.
 Sources of truth: `research/ARCHITECTURE.md` (ADR, 20 decisions), `research/BEHAVIOR.md` (attack model + replay results), `research/RESEARCH.md`, corpus `research/samples-2026-08-30/*.jsonl`.
 
 ## Problem Statement
