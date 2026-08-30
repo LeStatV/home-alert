@@ -445,18 +445,39 @@ def test_19_aug_a_launch_on_another_city_neither_sounds_nor_changes_the_count():
     assert before[4].startswith("≥4 ") and after[4].startswith("≥4 ")
 
 
-def test_21_aug_a_cruise_missile_leaving_kyiv_oblast_is_not_our_alert():
-    """21 Aug 22:18-22:29, the tail of the Бандероль wave: the last one turns away
-    down the Dnipro and AerisRimor calls `Канів підліт 5хв Бандероль.` twice.
-    `підліт` is the word that wakes the house when it comes with a Kyiv place; with
-    Канів, Драбів and Черкащина it is somebody else's five minutes (SPEC story 12).
+def test_21_aug_a_relaunched_call_never_rings_twice_and_the_tail_wakes_nobody():
+    """21 Aug 22:12-22:29, the end of the Бандероль wave. Two things must hold.
 
-    Two silent INFO drone updates are all that leaves -- war_monitor's `🅿️ і остання
-    Бандероль ... у напрямку Київщини`, which its own drone marker keeps on the drone
-    event it was already on. Nothing audible at all.
+    nebo_raketa posts `Нові два Бандеролі залітаються на Згурівку у бік Броварів` at
+    22:12:06 -- an approach word over Бровари, so URGENT -- and re-posts it verbatim as
+    a reply 3 m 30 s later. `context` no longer recognises the bump: its parent left the
+    3-min window. The event does, because the launch call it last folded in is the same
+    string, so 22:15:36 is a body update and the phone stays quiet.
+
+    Then the last one turns away down the Dnipro and AerisRimor calls `Канів підліт 5хв
+    Бандероль.` twice. `підліт` is the word that wakes the house when it comes with a
+    Kyiv place; with Канів and Черкащина it is somebody else's five minutes (story 12).
     """
-    assert replay("2026-08-21T22-18_22-29") == [
-        ("22:18:42", "NEW", "INFO", "БпЛА над Києвом"),
+    assert replay("2026-08-21T22-12_22-29") == [
+        ("22:12:06", "NEW", "URGENT", "КРИЛАТІ РАКЕТИ на Київ"),
+        ("22:14:51", "NEW", "INFO", "БпЛА над Києвом"),
+        ("22:15:21", "UPDATE", "INFO", "БпЛА над Києвом"),
+        ("22:15:36", "UPDATE", "URGENT", "КРИЛАТІ РАКЕТИ на Київ"),
+        ("22:18:42", "UPDATE", "INFO", "БпЛА над Києвом"),
         ("22:22:42", "UPDATE", "INFO", "БпЛА над Києвом"),
     ]
-    assert audible("2026-08-21T22-18_22-29") == []
+    assert [p for p in audible("2026-08-21T22-12_22-29") if p[0] > "22:12:06"] == []
+
+
+def test_21_aug_a_bearing_on_kyiv_survives_the_oblasts_the_wave_crosses():
+    """21 Aug 23:35-23:45: kpszsu (w=1.0) posts `Чернігівщина: "Бандероль" повз Ічню у
+    напрямку Київщини.` -- the only Kyiv-ward signal any channel gives that night before
+    the wave reaches Бровари twelve minutes later. It names Чернігівщина, so a gate on
+    "names another city" would file it as somebody else's launch and push nothing.
+
+    Kyiv-gating is on the target, and a bearing that says Kyiv is a target statement:
+    WATCH, never an immediate URGENT (SPEC story 11).
+    """
+    assert replay("2026-08-21T23-35_23-45") == [
+        ("23:39:15", "NEW", "WATCH", "Пуск ракет, ціль уточнюється"),
+    ]

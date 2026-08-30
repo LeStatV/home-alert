@@ -106,6 +106,11 @@ def places(text):
 # Ordinals a channel counts its own launches with: «Четверта», «П'ятий, шостий та сьомий»
 ORDINALS = [("перш", 1), ("друг", 2), ("трет", 3), ("четверт", 4), (r"п.?ят", 5),
             ("шост", 6), ("сьом", 7), ("восьм", 8), (r"дев.?ят", 9)]
+# A digit is a count only where it counts something («5 Цирконів», «4-6 одиниць»,
+# «2х КР») or enumerates («8 та 9»). `02:20`, `20 км` and `13 загиблих` are not.
+COUNTED = re.compile(r"(\d+)(?:\s*[-–]\s*(\d+))?\s*(?:х\b|шт|ракет|ціл|баліст|груп"
+                     r"|одиниц|цирк|калібр|бандерол|онікс|шахед|бпла|дрон|реактив)"
+                     r"|(\d+)\s*(?:та|і|й)\s*(\d+)\b", re.I)
 
 
 def count(text):
@@ -114,7 +119,8 @@ def count(text):
     Never summed across channels (BEHAVIOR.md fix 2: summing gave «#48» for six
     missiles). Anything above 20 is a model number, not a count: Х-101, С-400, Ту-95.
     """
-    numbers = [int(digits) for digits in re.findall(r"\d+", text) if int(digits) <= 20]
+    numbers = [int(digits) for match in COUNTED.finditer(text)
+               for digits in match.groups() if digits and int(digits) <= 20]
     numbers += [value for stem, value in ORDINALS
                 if re.search(rf"\b{stem}[аяиіоеу]", text, re.I)]
     return max(numbers, default=0)

@@ -20,9 +20,6 @@ def replay(fixture, cooldown_min=None, **overrides):
     `cooldown_min` overrides the household's per-tier drone cooldowns, e.g.
     `cooldown_min={"URGENT": 30}`; anything else overrides the ballistic knobs.
     """
-    config = yaml.safe_load((ROOT / "config.yaml").read_text())
-    config["ballistic"].update(overrides)
-    config["drone"]["cooldown_min"].update(cooldown_min or {})
     return [p[:4] for p in bodies(fixture, cooldown_min, **overrides)]
 
 

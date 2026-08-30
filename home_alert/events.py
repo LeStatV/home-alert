@@ -27,9 +27,8 @@ TITLES = {
     ("ballistic", False): "БАЛІСТИКА на Київ",
     ("missile", True): "Пуск ракет, ціль уточнюється",
     ("missile", False): "КРИЛАТІ РАКЕТИ на Київ",
-    ("other", True): "Пуск на інше місто",
-    ("other", False): "Пуск на інше місто",
 }
+OTHER_TITLE = "Пуск на інше місто"
 
 # -- drones. Also fixed by the spec; only the per-tier cooldowns are the household's.
 DRONE_WINDOW = timedelta(minutes=8)      # one event per zone while reports keep coming
@@ -59,6 +58,7 @@ class Event:
     places: set = field(default_factory=set)
     sources: set = field(default_factory=set)
     counts: dict = field(default_factory=dict)   # channel -> its own largest figure
+    last_text: str = ""      # the last launch call folded in, verbatim
 
     @property
     def tier(self):
@@ -70,7 +70,7 @@ class Event:
 
     @property
     def title(self):
-        return TITLES[(self.type, self.pending)]
+        return OTHER_TITLE if self.type == "other" else TITLES[(self.type, self.pending)]
 
     @property
     def tag(self):
@@ -223,8 +223,10 @@ def replay(messages, config, sink, store=None):
                 and weights.get(message.channel, 0.0) >= LAUNCH_WEIGHT_MIN):
             etype = "missile" if missile else "ballistic"
             # gating is on the target, not on every name: `на Київ повз Прилуки, Ніжин`
-            # is ours, `Ціль на Ромни!` is a log-only event of its own
-            if parse.names_non_kyiv and not parse.targets_kyiv:
+            # and `повз Ічню у напрямку Київщини` are ours, `Ціль на Ромни!` is a
+            # log-only event of its own. Without the bearing here the oblasts a wave
+            # transits swallow the only Kyiv-ward signal a channel ever gives.
+            if parse.names_non_kyiv and not (parse.targets_kyiv or parse.is_direction):
                 etype = "other"
             target = parse.places if etype != "missile" or parse.is_approach else ()
             event = live.get(etype)
@@ -235,13 +237,17 @@ def replay(messages, config, sink, store=None):
             else:
                 event.launches += 1
                 event.last_launch = message.time
+                # a launch call re-posted verbatim is the same fact twice, whatever the
+                # gap. `context` only catches it while the parent is still in its 3-min
+                # window; nebo_raketa's 21 Aug 22:15:36 re-post came 3 m 30 s later.
                 kind = ("PROMOTE" if event.pending and target else
-                        "RESOUND" if not event.pending
+                        "RESOUND" if not event.pending and text != event.last_text
                         and message.time - event.sounded >= resound_gap else "UPDATE")
                 if kind != "UPDATE":
                     event.pending = False
                     event.sounded = message.time
             event.fold(message, parse, target)
+            event.last_text = text
             if etype != "other":
                 emit(kind, event.tier, event.title, event.tag, event.count)
             done(event)
