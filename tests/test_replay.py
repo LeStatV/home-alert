@@ -1,4 +1,4 @@
-from harness import replay, sounds
+from harness import audible, replay, sounds
 
 
 def test_21_aug_ballistic_launch_watch_then_urgent():
@@ -22,18 +22,29 @@ def test_27_aug_urgent_long_before_the_official_channel():
     """27 Aug 00:00-00:30: `Вихід балістики з Брянська` opens a WATCH; kyiv_nebo
     names Kyiv 21 s later and promotes it -- 26 minutes before kpszsu's 00:26:40.
 
-    The 00:04:58 and 00:28:56 resounds are war_monitor bumping its own launch post
-    as a reply. Bump dedup is context assembly, which this ticket leaves out.
+    Three of the old resounds were bumps -- war_monitor and Ukrainian_Intelligence
+    re-posting their own launch as a reply (00:02:41, 00:04:58, 00:28:56). A bump is
+    a no-op, so the second sound is now AerisRimor's own next launch call at 00:02:47.
+
+    The 00:09:50 threat INFO is an edge of the slice, not a result worth reading into:
+    the fixture starts at 00:00, so no earlier declaration is in scope to open the
+    15-min threat window that would otherwise dedup it.
     """
     assert sounds("2026-08-27T00-00_00-30") == [
         ("00:00:18", "NEW", "WATCH", "Пуск балістики, ціль уточнюється"),
         ("00:00:39", "PROMOTE", "URGENT", "БАЛІСТИКА на Київ"),
-        ("00:02:41", "RESOUND", "URGENT", "БАЛІСТИКА на Київ"),
-        ("00:04:58", "RESOUND", "URGENT", "БАЛІСТИКА на Київ"),
+        ("00:02:47", "RESOUND", "URGENT", "БАЛІСТИКА на Київ"),
+        ("00:09:50", "NEW", "INFO", "Загроза балістики"),
         ("00:24:54", "NEW", "WATCH", "Пуск балістики, ціль уточнюється"),
         ("00:26:22", "PROMOTE", "URGENT", "БАЛІСТИКА на Київ"),
-        ("00:28:56", "RESOUND", "URGENT", "БАЛІСТИКА на Київ"),
     ]
+
+
+def test_bump_reposts_are_a_no_op():
+    """27 Aug: war_monitor's 00:28:56 re-post of `Київ — спуск балістики! Третя`
+    as a reply to itself is the same fact twice -- no event, no update, no sound."""
+    bumps = {"00:00:36", "00:00:51", "00:02:41", "00:26:34", "00:28:56"}
+    assert [p for p in replay("2026-08-27T00-00_00-30") if p[0] in bumps] == []
 
 
 def test_target_less_launch_expires_without_ever_sounding_urgent():
@@ -53,8 +64,11 @@ def test_nightly_summary_alone_produces_nothing():
 
 
 def test_22_aug_past_tense_and_promotion_post_never_sound():
-    """22 Aug 08:36-08:50: URGENT at 08:39:50. Afterwards AerisRimor's past-tense
-    `Цілі були або Іскандери…` and nebo_raketa's `@Kyiv` cross-promo push nothing."""
+    """22 Aug 08:36-08:50: AerisRimor's target-less `ЦІЛЬ` is a WATCH at 08:39:49 and
+    Ukrainian_Intelligence's `КИЇВ ЦІЛЬ` promotes it to URGENT one second later -- 14 s
+    before kpszsu, the official channel, posts `Балістичні ракети на Київ.` at 08:40:04.
+    Afterwards AerisRimor's past-tense `Цілі були або Іскандери…` and nebo_raketa's
+    `@Kyiv` cross-promo push nothing."""
     assert sounds("2026-08-22T08-36_08-50") == [
         ("08:37:48", "NEW", "INFO", "Загроза балістики"),
         ("08:39:49", "NEW", "WATCH", "Пуск балістики, ціль уточнюється"),
@@ -65,22 +79,52 @@ def test_22_aug_past_tense_and_promotion_post_never_sound():
     assert [p for p in replay("2026-08-22T08-36_08-50") if p[0] == "08:47:46"] == []
 
 
-def test_19_aug_launches_on_other_cities_stay_below_the_notifier():
-    """19 Aug 20:52-20:58: URGENT at 20:52:25, and the launch calls naming Ромни,
-    Лубни, Миргород and Курщина push nothing while the Kyiv event is live."""
-    pushes = replay("2026-08-19T20-52_20-58")
-    assert [p for p in pushes if p[1] in ("NEW", "PROMOTE", "RESOUND")] == [
-        ("20:52:17", "NEW", "INFO", "Загроза балістики"),
+def test_19_aug_ballistic_wave_is_eight_sounds_in_twenty_six_minutes():
+    """19 Aug 20:50-21:16, the corpus's heaviest raid: URGENT at 20:52:25, the first
+    launch message any channel posted. AerisRimor's `ЦІЛЬ` -> `КИЇВ` -> `Балістика` ->
+    `На Бровари!!` burst three seconds later resolves into that same event -- never a
+    WATCH of its own -- and the seven waves that follow re-sound at most once every two
+    minutes. Eight audible pushes in 26 minutes, the number BEHAVIOR.md measured.
+
+    The threat declaration at 20:52:17 is INFO: priority 2, silent by spec, not a sound.
+    """
+    assert audible("2026-08-19T20-50_21-16") == [
         ("20:52:25", "NEW", "URGENT", "БАЛІСТИКА на Київ"),
         ("20:54:40", "RESOUND", "URGENT", "БАЛІСТИКА на Київ"),
+        ("20:58:01", "RESOUND", "URGENT", "БАЛІСТИКА на Київ"),
+        ("21:00:40", "RESOUND", "URGENT", "БАЛІСТИКА на Київ"),
+        ("21:03:16", "RESOUND", "URGENT", "БАЛІСТИКА на Київ"),
+        ("21:05:40", "RESOUND", "URGENT", "БАЛІСТИКА на Київ"),
+        ("21:09:38", "RESOUND", "URGENT", "БАЛІСТИКА на Київ"),
+        ("21:11:45", "RESOUND", "URGENT", "БАЛІСТИКА на Київ"),
     ]
-    non_kyiv = {"20:55:45", "20:57:11", "20:57:12", "20:57:15", "20:57:21"}
-    assert [p for p in pushes if p[0] in non_kyiv] == []
+    assert [p for p in replay("2026-08-19T20-50_21-16")
+            if p[3] == "Загроза балістики"] == [
+        ("20:52:17", "NEW", "INFO", "Загроза балістики")]
+
+
+def test_19_aug_launches_on_other_cities_stay_below_the_notifier():
+    """The launch calls naming Ромни, Лубни, Миргород, Курщина and Чернігів push
+    nothing, even while the Kyiv event is live."""
+    non_kyiv = {"20:55:45", "20:55:51", "20:57:11", "20:57:12", "20:57:15", "20:57:21",
+                "21:05:44", "21:09:29"}
+    assert [p for p in replay("2026-08-19T20-50_21-16") if p[0] in non_kyiv] == []
+
+
+def test_25_aug_a_bumped_target_call_never_becomes_a_kyiv_urgent():
+    """25 Aug 20:54-20:58: the night's ballistics went to Ромни and Полтава. Before the
+    bump was a no-op, nebo_raketa re-posting its own `🚀Ціль` as a reply opened a WATCH
+    inside kpszsu's threat window, and kyiv_nebo's `Київ, зреагуйте` promoted it to a
+    false URGENT -- the 25 Aug false positive BEHAVIOR.md records. Only the threat INFO
+    is left."""
+    assert replay("2026-08-25T20-54_20-58") == [
+        ("20:55:17", "NEW", "INFO", "Загроза балістики"),
+    ]
 
 
 def test_resound_gap_is_configuration():
     """Widening the resound gap collapses the repeat launch calls into the body."""
-    assert [p[1] for p in sounds("2026-08-27T00-00_00-30", resound_gap_min=10)] == [
+    assert [p[1] for p in audible("2026-08-27T00-00_00-30", resound_gap_min=10)] == [
         "NEW", "PROMOTE", "NEW", "PROMOTE"]
 
 
@@ -121,4 +165,22 @@ def test_19_aug_modifier_apostrophe_target_call_is_a_launch():
         ("21:05:46", "PROMOTE", "URGENT", "БАЛІСТИКА на Київ"),
         ("21:09:38", "RESOUND", "URGENT", "БАЛІСТИКА на Київ"),
         ("21:11:45", "RESOUND", "URGENT", "БАЛІСТИКА на Київ"),
+    ]
+
+
+def test_a_kyiv_place_promotes_a_pending_launch_whatever_the_channel_said_before():
+    """SYNTHETIC fixture -- the corpus never puts a drone report and a target-less
+    ballistic WATCH close enough together to make the choice visible. Wording is
+    verbatim from the corpus (AerisRimor's `Реактив сектор Білогородка - Бузова.` and
+    `Київ увага!`, Ukrainian_Intelligence's `‼️ Вихід балістики з Брянська`).
+
+    A target-less launch opens a WATCH 2 min after the channel's last drone post, and a
+    bare `Київ увага!` follows 20 s later. SPEC promotes on "the next Kyiv place from
+    ANY channel" with no type qualifier, so it promotes: only a drone word in the
+    message's own text may veto, never an inherited or remembered type. Getting this
+    wrong leaves the WATCH to expire and the household asleep.
+    """
+    assert replay("synthetic-drone-context-still-promotes") == [
+        ("01:02:00", "NEW", "WATCH", "Пуск балістики, ціль уточнюється"),
+        ("01:02:20", "PROMOTE", "URGENT", "БАЛІСТИКА на Київ"),
     ]

@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 from . import rules
+from .context import Context
 from .notify import Push
 
 # Fixed by the spec, not by the household -- only the resound gap is tunable.
@@ -50,6 +51,7 @@ def replay(messages, config, sink, store=None):
 
     event = None
     threat_until = None
+    context = Context()
 
     for message in messages:
         text = " ".join(message.text.split())
@@ -70,6 +72,13 @@ def replay(messages, config, sink, store=None):
         if not text or parse.is_noise:
             done()
             continue
+
+        # spec order is noise -> context -> rules: an ad must not set the channel's type
+        in_context = context.assemble(message, text, parse)
+        if in_context is None:      # a bump: the same text re-posted as a reply
+            done()
+            continue
+        parse = in_context
 
         # the message clock closes stale events and expires unconfirmed launches
         if event and message.time - event.last_launch > EVENT_TTL:
