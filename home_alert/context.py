@@ -19,8 +19,13 @@ MEMORY = timedelta(minutes=3)
 def kind(parse):
     """The threat type a message states in its own words, or None if it states none.
 
-    A message carrying both (`🅿️ Одеса 4х мгКР Бандероль над містом.`) reads as a
-    drone; when #5 gives cruise missiles their own tier this needs a real precedence.
+    A message carrying both (`🅿️ Одеса 4х мгКР Бандероль над містом.`) still reads as a
+    drone, and cruise missiles deliberately do not appear here at all. #5 put the
+    drone/missile precedence where it decides something -- routing a launch in
+    `events.py`, on the message's own `names_missile and not is_drone` -- rather than in
+    this memory, which only ever answers "what is a bare place name from this channel".
+    Letting a missile word overwrite a channel's remembered type would change how the
+    drone events read every terse post that follows it, for no gain on the launch path.
     """
     if parse.is_drone:
         return "drone"
