@@ -239,8 +239,7 @@ class Pipeline:
         alone posts nationwide every few minutes, so live that is seconds; if every
         channel goes dark at once the all-clear waits, which is the honest answer.
         """
-        said = max([when for when in (self.cleared_at, self.siren_off) if when],
-                   default=None)
+        said = max([at for at in (self.cleared_at, self.siren_off) if at], default=None)
         if (self.last_near is None or when - self.last_near < ALL_CLEAR_QUIET
                 or said is None or said < self.last_near):
             return []
