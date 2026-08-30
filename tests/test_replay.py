@@ -87,10 +87,16 @@ def test_resound_gap_is_configuration():
 def test_cold_burst_launch_on_kyiv_needs_no_prior_context():
     """SYNTHETIC fixture -- the one shape the corpus never supplies: a launch burst
     that opens with no declared threat and no ballistic word anywhere. SPEC story 4
-    is unconditional, so naming Kyiv in a launch call is context enough."""
+    is unconditional, so naming Kyiv in a launch call is context enough.
+
+    The last message is the same call with trailing punctuation, far enough after the
+    first burst that the event has closed: it can only push via the launch branch, so
+    it pins the `<PLACE> ЦІЛЬ!` family that AerisRimor and war_monitor actually type.
+    """
     assert replay("synthetic-cold-launch-burst") == [
         ("08:39:50", "NEW", "URGENT", "БАЛІСТИКА на Київ"),
         ("08:39:58", "UPDATE", "URGENT", "БАЛІСТИКА на Київ"),
+        ("08:46:00", "NEW", "URGENT", "БАЛІСТИКА на Київ"),
     ]
 
 

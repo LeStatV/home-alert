@@ -55,11 +55,10 @@ class Ntfy:
             "message": push.body,
             "priority": SILENT if push.kind == "UPDATE" else PRIORITY[push.tier],
             "tags": [TAGS[push.tier]],
-            # ponytail: the stable per-event id rides along but nothing consumes it yet;
-            # wiring it to real replace-in-place is its own ticket. Not a `tag`: ntfy
-            # renders those as visible chips in the notification.
-            "x-event": push.tag,
         }
+        # ponytail: push.tag (the stable per-event id) is deliberately not sent. ntfy has
+        # no field for it -- `tags` renders as visible chips and an invented key risks a
+        # 400 -- so replace-in-place gets wired when its own ticket verifies a mechanism.
         request = urllib.request.Request(
             self.url, data=json.dumps(payload).encode(),
             headers={"Content-Type": "application/json"} |
