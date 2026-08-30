@@ -1,0 +1,27 @@
+# home-alert configuration. Secrets come from the environment, never from here.
+
+corpus: research/samples-2026-08-30   # replay source (dir of <channel>.jsonl)
+db: home-alert.db                     # sqlite file; `replay` uses :memory: unless --db
+
+channels:            # trust weight per channel
+  kpszsu: 1.0
+  war_monitor: 0.9
+  nebo_raketa: 0.8
+  AerisRimor: 0.7
+  Ukrainian_Intelligence: 0.6
+  kyiv_nebo: 0.6
+
+ballistic:
+  launch_weight_min: 0.6   # a launch from a weaker channel is logged, never pushed
+  threat_window_min: 15    # one INFO per declared-threat window
+  pending_ttl_s: 90        # target-less launch stays WATCH this long, then expires
+  event_ttl_min: 5         # event closes after this long without launches
+  resound_gap_min: 2       # minimum gap between sounds on one event
+
+ntfy:
+  url: https://ntfy.example.net
+  token_env: NTFY_TOKEN
+  topics:            # family subscribes `urgent`, owner subscribes `urgent` + `all`
+    URGENT: urgent
+    WATCH: all
+    INFO: all
