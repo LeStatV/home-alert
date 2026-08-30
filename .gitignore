@@ -6,6 +6,9 @@
 *.sqlite*
 data/
 
+# `review` proposals: scratch until applied, and the applied change is the git record
+profiles/reviews/
+
 # research scratch (superseded by *.jsonl corpus)
 research/samples-*/*.html
 research/samples-*/sim_*.txt

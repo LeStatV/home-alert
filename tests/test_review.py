@@ -228,6 +228,7 @@ def test_a_second_night_extends_the_line_the_first_review_added(tmp_path, monkey
     first = run(tmp_path, monkeypatch)
     subprocess.run(["patch", "-p0", "-d", str(tmp_path)], stdin=first.open(),
                    check=True, capture_output=True)
+    first.unlink()          # applied, so it goes -- the git history is the record
 
     tonight = ["три бавовники над Виноградарем"]
     answer = json.dumps({"type_vocab": {"drone": ["пепелац", "бавовник"]},
@@ -294,3 +295,53 @@ def test_a_week_is_a_window_too():
     """`--since 7d` after a quiet week, and `7d` is the other half of the parser."""
     assert review.window("7d") == timedelta(days=7)
     assert review.window("24h") == review.window("1d")
+
+
+def test_a_review_file_nobody_has_applied_is_never_overwritten(tmp_path, monkeypatch):
+    """An on-demand run over the same night must not quietly replace last night's
+    proposals -- they are the only copy, and nobody has read them yet."""
+    file = run(tmp_path, monkeypatch)
+    before = file.read_bytes()
+    with pytest.raises(SystemExit, match="has not been applied"):
+        run(tmp_path, monkeypatch)
+    assert file.read_bytes() == before
+
+
+# A promoted `add-channel` draft: `weight` filled in by hand, and the four collections
+# still in the flow style `yaml.safe_dump` wrote them in. Appending a `- pattern` line
+# under `noise_patterns: []` is a diff that applies and then does not load.
+PROMOTED = """channel: war_monitor
+weight: 0.9
+language: uk
+threads_by_reply: false
+default_type: null
+noise_patterns: []
+type_vocab: {}
+place_aliases: {}
+examples: []
+"""
+
+
+def test_a_profile_the_edit_would_break_costs_the_proposal_not_the_agent(
+        tmp_path, monkeypatch, capsys):
+    """A profile that does not load stops the agent at startup, in the dark, hours
+    after anybody read the review file. So the line surgery is checked against the
+    merge PyYAML would have done, and a proposal the two disagree about is dropped."""
+    settings = config(tmp_path, "openai")
+    (settings["profiles"] / f"{CHANNEL}.yaml").write_text(PROMOTED, encoding="utf-8")
+    monkeypatch.setattr(llm, "client", lambda config: FakeLLM())
+    file = review.review(settings, seed(tmp_path), sink=notify.Recorder())
+
+    assert file is None
+    assert "does not parse" in capsys.readouterr().out
+    assert profiles.load(settings["profiles"])[CHANNEL].weight == 0.9   # still loads
+
+
+def test_what_a_noise_pattern_would_silence_is_in_the_file_not_only_on_stdout(
+        tmp_path, monkeypatch):
+    """The nightly run's stdout goes nowhere. A catch-all pattern passes every gate
+    there is -- it compiles, it is new, it is fast -- and the only thing standing
+    between the owner and a silenced channel is the number next to it."""
+    answer = json.dumps({"noise_patterns": ["."], "examples": []})
+    text = run(tmp_path, monkeypatch, answer=answer).read_text(encoding="utf-8")
+    assert "noise '.': silences 5/5 of them" in text.split("---")[0]

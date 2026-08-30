@@ -191,6 +191,9 @@ def draft_prompt(handle, messages, config, note=""):
     through the same validation, and a second copy of it would drift.
     """
     shown = messages[-PROMPT_MESSAGES:]
+    # 200 characters each: `_item` in `review.py` dumps a proposed example on one
+    # line (`width=1000`), which is only safe because no message the model was shown
+    # -- and so no verbatim example -- is longer than this.
     return PROMPT.format(
         channel=handle, note=note, home=", ".join(config.get("home") or ()),
         nearby=", ".join(config.get("nearby") or ()),
@@ -266,8 +269,8 @@ def _examples(examples, note):
 
 
 def swallowed(patterns, messages, note):
-    """The accepted noise patterns, each with what it would silence out of this
-    history printed next to it -- a pattern nobody has run is a guess, and `.*` reads
+    r"""The accepted noise patterns, each with what it would silence out of this
+    history noted next to it -- a pattern nobody has run is a guess, and `.*` reads
     as `500/500` rather than as a plausible line of YAML.
 
     A pattern that cannot get through the history inside `NOISE_BUDGET` is dropped:
@@ -291,7 +294,10 @@ def swallowed(patterns, messages, note):
                 hits = None
                 break
         if hits is not None:
-            print(f"  noise {pattern!r}: silences {hits}/{len(messages)} of them")
+            # a note and not a `print`: `review` runs from cron at 05:17 with stdout
+            # going nowhere, and `noise '.': silences 47/47` is the one line standing
+            # between the owner and a silenced channel
+            note(f"noise {pattern!r}: silences {hits}/{len(messages)} of them")
             kept.append(pattern)
     return kept
 
@@ -391,7 +397,7 @@ def add(handle, config, history_path=None, limit=500):
         return None
     written = write_draft(handle, answer, messages, directory, notes.append)
     if notes:
-        print(f"\ndropped from the draft ({len(notes)}):")
+        print(f"\nnotes on the draft ({len(notes)}):")
         for line in notes:
             print(f"  {line}")
     if written:

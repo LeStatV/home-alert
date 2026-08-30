@@ -96,3 +96,8 @@ or the review file goes away with the container. In the host's crontab:
 
 Then `git -C /srv/home-alert diff profiles/` after applying anything, and restart the
 agent: profiles are read once, at startup.
+
+`profiles/reviews/` is gitignored -- a proposal is scratch, and the applied change is
+the git record. Delete the file once you have applied what you want from it: a review
+of a night whose file is still sitting there refuses to run rather than overwrite
+proposals nobody has read.

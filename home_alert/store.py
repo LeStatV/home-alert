@@ -74,6 +74,12 @@ class Store:
         return [Message(channel, msg_id, datetime.fromisoformat(time), reply_to, text)
                 for channel, msg_id, time, reply_to, text in rows]
 
+    def latest(self):
+        """The newest stored message time, or None -- the clock a `review` window
+        ends at, so a run at 04:00 sees the night that ended at 03:50."""
+        found = self.db.execute("select max(time) from messages").fetchone()[0]
+        return datetime.fromisoformat(found) if found else None
+
     def record_edit(self, message):
         """A corrected message: new text, flag raised, parse left alone.
 

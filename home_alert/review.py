@@ -86,15 +86,14 @@ def collect(config, db, since):
     parent, not the channel's 3-minute memory, not its `default_type` -- and not an
     all-clear, which types nothing and is not a miss.
     """
-    messages = store.Store(db).messages()
-    if not messages:
+    opened = store.Store(db)
+    end = opened.latest()
+    if end is None:
         return {}, None
-    end = messages[-1].time         # `store.messages` is ordered by time
     loaded = profiles.load(config["profiles"])
     groups = defaultdict(list)
-    for message in messages:
-        if message.time >= end - window(since):
-            groups[message.channel].append(message)
+    for message in opened.messages(end - window(since), end):
+        groups[message.channel].append(message)
     found = {}
     for channel, group in groups.items():
         _, missed, _ = add_channel.coverage(group, loaded.get(channel))
@@ -267,19 +266,49 @@ def propose(channel, path, group, config, client, note):
     if fields is None:
         note("the provider did not answer with usable JSON")
         return None, 0, 0
-    print(f"\nnoise patterns proposed for @{channel}, over the {len(messages)} "
-          "messages in the window:")
     new = additions(fields, current, missed, messages, note)
     proposed = new.pop("examples")
+    expected = _merged(current, new, channel)
     new["examples"] = add_channel.approved(
-        add_channel.profile_of(_merged(current, new, channel)), proposed, note)
+        add_channel.profile_of(expected), proposed, note)
     if not any(new.values()):
+        return None, 0, len(proposed)
+    expected["examples"] = list(current.get("examples") or ()) + new["examples"]
+    edited = merge(text, current, new)
+    if not sound(edited, expected, note):
         return None, 0, len(proposed)
     name = f"{Path(config['profiles']).name}/{path.name}"
     return ("".join(difflib.unified_diff(text.splitlines(keepends=True),
-                                         merge(text, current, new).splitlines(True),
+                                         edited.splitlines(keepends=True),
                                          fromfile=name, tofile=name)),
             len(new["examples"]), len(proposed))
+
+
+def sound(text, expected, note):
+    """Does the edited file parse into exactly the merge it was meant to be?
+
+    `add-channel` writes its drafts with `noise_patterns: []` and `type_vocab: {}`,
+    and a promoted draft carries those flow scalars into `profiles/`. Appending a
+    `- pattern` line under one of them is a diff that applies cleanly and then does
+    not load -- and a profile that does not load stops the agent at startup, in the
+    dark, hours after anybody read this file.
+
+    So the line surgery is checked against the merge PyYAML would have done: two
+    implementations of the same edit, and a proposal only survives when they agree.
+    """
+    empty = {"noise_patterns": [], "examples": [], "type_vocab": {}, "place_aliases": {}}
+    try:
+        loaded = yaml.safe_load(text)
+    except yaml.YAMLError as error:
+        note(f"the edited profile does not parse ({type(error).__name__}) -- "
+             "the whole proposal for this channel is dropped")
+        return False
+    for key, nothing in empty.items():
+        if (loaded.get(key) or nothing) != (expected.get(key) or nothing):
+            note(f"the edited profile's `{key}` is not the merge it was meant to be "
+                 "-- the whole proposal for this channel is dropped")
+            return False
+    return True
 
 
 def _merged(current, new, channel):
@@ -298,57 +327,73 @@ def _merged(current, new, channel):
 def review(config, db, since="24h", sink=None):
     """The whole command: collect, report, propose, summarize."""
     sink = sink or notify.Console()
-    directory = Path(config["profiles"])
-    collected, end = collect(config, db, since)
-    total = sum(len(missed) for _, missed in collected.values())
-    print(f"\nreview -- the last {since} of {db}, "
-          + (f"ending {end:%Y-%m-%dT%H:%M:%S}" if end else "which is empty"))
-    for channel, (_, missed) in sorted(collected.items()):
-        print(f"\n@{channel} -- {len(missed)} the rules got no type out of:")
-        for message, text in missed:
-            print(f"  {message.time:%Y-%m-%dT%H:%M:%S}  {text}")
+    # AC4 is one line per *run*, not per finding: a crash halfway through the LLM
+    # calls is exactly the run the owner needs to hear about, so the line is in a
+    # `finally` and starts out saying the run did not get to the end.
+    line = "the run did not finish"
+    try:
+        directory = Path(config["profiles"])
+        collected, end = collect(config, db, since)
+        total = sum(len(missed) for _, missed in collected.values())
+        print(f"\nreview -- the last {since} of {db}, "
+              + (f"ending {end:%Y-%m-%dT%H:%M:%S}" if end else "which is empty"))
+        for channel, (_, missed) in sorted(collected.items()):
+            print(f"\n@{channel} -- {len(missed)} the rules got no type out of:")
+            for message, text in missed:
+                print(f"  {message.time:%Y-%m-%dT%H:%M:%S}  {text}")
 
-    client = llm.client(config.get("llm"))
-    if client is None and collected:
-        print("\nno LLM provider configured (llm.provider: none) -- the report above "
-              "is the whole run.\nSet `llm.provider` to have the unparsed messages "
-              "turned into proposed profile changes.")
-    chunks, notes, kept, proposed = [], [], 0, 0
-    for channel, group in sorted(collected.items()) if client else ():
-        path = directory / f"{channel}.yaml"
-        if not path.exists():
-            notes.append(f"@{channel}: no profile to propose changes to -- "
-                         f"`home-alert add-channel @{channel}` writes one")
-            continue
-        said = []
-        chunk, agreed, asked = propose(channel, path, group, config, client, said.append)
-        kept, proposed = kept + agreed, proposed + asked
-        notes += [f"@{channel}: {line}" for line in said]
-        if chunk:
-            chunks.append(chunk)
-        else:
-            notes.append(f"@{channel}: nothing left to propose")
-    file = _write(directory, end, since, chunks, notes, kept, proposed)
-    line = (f"{total} unparsed across {len(collected)} "
-            f"channel{'s' * (len(collected) != 1)}, "
-            f"{len(chunks)} proposal{'s' * (len(chunks) != 1)} written")
-    if notes:
-        print(f"\nnotes ({len(notes)}):")
-        for note in notes:
-            print(f"  {note}")
-    if file:
-        print(f"\nwrote {file} -- read it, then `patch -p0 -d {directory.parent}` "
-              "the hunks you agree with. Nothing in `profiles/` has changed.")
-    print(f"\nreview: {line}")
-    notify.system(sink, "review", line)
-    return file
+        target = directory / "reviews" / f"{end:%Y-%m-%d}.diff" if end else None
+        # Before the provider is asked, not after: a second run of the same night
+        # would otherwise spend the LLM budget and then overwrite proposals nobody
+        # has read. The owner applies the file and deletes it, in that order.
+        if target and target.exists():
+            raise SystemExit(
+                f"{target} is from an earlier run of this night and has not been "
+                "applied. Read it, apply the hunks you agree with, and move or "
+                "delete it before reviewing this night again.")
+
+        client = llm.client(config.get("llm"))
+        if client is None and collected:
+            print("\nno LLM provider configured (llm.provider: none) -- the report "
+                  "above is the whole run.\nSet `llm.provider` to have the unparsed "
+                  "messages turned into proposed profile changes.")
+        chunks, notes, kept, proposed = [], [], 0, 0
+        for channel, group in sorted(collected.items()) if client else ():
+            path = directory / f"{channel}.yaml"
+            if not path.exists():
+                notes.append(f"@{channel}: no profile to propose changes to -- "
+                             f"`home-alert add-channel @{channel}` writes one")
+                continue
+            said = []
+            chunk, agreed, asked = propose(channel, path, group, config, client,
+                                           said.append)
+            kept, proposed = kept + agreed, proposed + asked
+            notes += [f"@{channel}: {said_line}" for said_line in said]
+            if chunk:
+                chunks.append(chunk)
+            else:
+                notes.append(f"@{channel}: nothing left to propose")
+        file = _write(target, directory, end, since, chunks, notes, kept, proposed)
+        line = (f"{total} unparsed across {len(collected)} "
+                f"channel{'s' * (len(collected) != 1)}, "
+                f"{len(chunks)} proposal{'s' * (len(chunks) != 1)} written")
+        if notes:
+            print(f"\nnotes ({len(notes)}):")
+            for note in notes:
+                print(f"  {note}")
+        if file:
+            print(f"\nwrote {file} -- read it, then `patch -p0 -d {directory.parent}` "
+                  "the hunks you agree with. Nothing in `profiles/` has changed.")
+        return file
+    finally:
+        print(f"\nreview: {line}")
+        notify.system(sink, "review", line)
 
 
-def _write(directory, end, since, chunks, notes, kept, proposed):
+def _write(file, directory, end, since, chunks, notes, kept, proposed):
     """The review file, or None when there was nothing to propose."""
     if not chunks:
         return None
-    file = directory / "reviews" / f"{end:%Y-%m-%d}.diff"
     file.parent.mkdir(parents=True, exist_ok=True)
     file.write_text(
         HEADER.format(end=end, window=since, directory=directory.name, name=file.name,
