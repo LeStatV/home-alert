@@ -1,0 +1,38 @@
+# home-alert — architecture decisions (grilled 2026-08-30)
+
+Notify a family in Kyiv via ntfy about drones at/near home and ballistics toward Kyiv,
+from Telegram monitoring channels. See RESEARCH.md for source analysis.
+
+## Decisions
+
+| # | Topic | Decision |
+|---|---|---|
+| 1 | Data source | **Telegram only.** NEPTUN rejected (false ballistic reports). alerts APIs not used. |
+| 2 | Channels (v1) | `@war_monitor`, `@nebo_raketa`, `@AerisRimor`, `@Ukrainian_Intelligence`, **`@kpszsu` (official anchor, w=1.0 — on 22 Aug only it and war_monitor reported the actual launch)** + `@air_alert_ua` (siren state only). |
+| 3 | Access | **Telethon user session** (push updates, edits, no 20-msg limit). One login. |
+| 4 | Host | **Home server only** for v1 (VPS backup deferred; if added: separate Telethon login, ntfy-heartbeat active/standby). |
+| 5 | Tiers → ntfy priority | **URGENT p5**: drone in HOME set; **ballistic LAUNCH on Kyiv** (`Балістика на Київ`, `балістичні ракети на Київ`, `спуск/виходи балістики`, `N балістик на Київ`, `Бровари - Київ 4 балістики`). **WATCH p4**: drone in NEARBY set; ballistic launch with unspecified target from Bryansk/Kursk (`Балістика Брянськ!`). **INFO p2**: drones entering Kyiv oblast; **ballistic THREAT declared** (`Загроза балістики`, `Загроза застосування балістичного озброєння`, `Балістична небезпека`) — user: react to actual targets, not threats; all-clear (`Відбій загрози балістики`). Else log only (e.g. `балістика на Каменское`). **Missiles (Циркон/Онікс/КР/Бандероль)**: `у напрямку Києва` → WATCH; `на Київ`/`підліт`/`над містом`/`захід` → URGENT (19 Aug: Zircons hit Kyiv in the same 20 min as ballistics). |
+| 6 | Geometry | **Named sets**, no coordinates: `home: [...]`, `nearby: [...]` microdistricts in config (user fills). Rest of Kyiv/oblast → INFO. |
+| 7 | Parsing | **Noise filter (regex) → rules decide → LLM enriches leftovers** with 3 s timeout, fail-open. Unparsed msg naming HOME/NEARBY → WATCH. |
+| 8 | LLM provider | Pluggable, one config line. OpenAI-compatible client (OpenRouter free: 20 rpm / 50 per day, 1000 per day after $10 credits; Ollama; OpenAI) + Copilot SDK adapter (`github-copilot-sdk`, billing under AI Credits — verify with live test). GitHub Models API retired 2026-07-30. Unofficial Copilot proxies rejected (ToS). |
+| 9 | Scoring | Channel `weight ∈ [0,1]` in profile. Event = `(type, place-tier)` in 8-min window. Confidence = noisy-OR `1−Π(1−wᵢ)`. **URGENT fires immediately from one channel with w ≥ 0.8**; weaker → WATCH, promoted on 2nd source or reply-chain progression. Ballistic launch on Kyiv from any w ≥ 0.6 → URGENT (validated 21 Aug: 5/5 channels within 60 s, monitors led kpszsu by 2 min; 22 Aug: only kpszsu + war_monitor, kpszsu first). Launch→explosions gap observed 1–2 min ⇒ ballistic path must be Telethon push + rules only, never waits for LLM. |
+| 10 | Contradictions / all-clear | `збили/чисто/зникли` never cancel URGENT alone. All-clear INFO after ≥10 min without HOME/NEARBY reports AND (a channel said clear OR Kyiv siren ended). |
+| 11 | Silence | No weight penalty; track `last_post_age`; show `N/4 каналів активні` in pushes; system topic warns if all silent while siren on. |
+| 12 | Fatigue | One notification per event, replace-in-place via stable ntfy tag. Re-sound only on promotion, ≥10 min quiet gap, or count jump. Cooldowns: URGENT 5 min, WATCH 10, INFO 20. Body links source post. |
+| 13 | ntfy | **Self-hosted at home, auth on**, reachable via Tailscale/tunnel. Topics: `urgent` (family), `all` (owner), `system` (heartbeat, silent-channel warnings, errors). |
+| 14 | Channel profiles | `profiles/<channel>.yaml`: weight, threads_by_reply, noise_patterns, type_vocab, place_aliases, labelled `examples` (= regression tests). |
+| 15 | Onboarding | `add-channel @x`: pull ~500 msgs → LLM drafts profile + examples → rules coverage report → **human approves & sets weight**. `review` (nightly / on demand): proposes profile diffs from unclassified messages, never auto-applies. |
+| 16 | Stack | Python 3.12, one asyncio process, modules `reader / filter / rules / llm / events / notify`; **SQLite** for messages, events, notifications; `config.yaml` + env secrets; `docker compose` with `agent` + `ntfy`; first start interactive for Telegram login. |
+| 17 | Siren | Signal only, no gate. Shown in push, stored per event for later analysis. |
+| 19 | Missile 3-stage model | THREAT (INFO once/window, opens 15-min ballistic context) → LAUNCH (`ЦІЛЬ`, `спуск`, `вихід`, `балістика на`, `🚀 Ще`; target often absent → WATCH, promoted to URGENT by the next place message from any channel within 60 s) → TRAJECTORY (bare place names → body updates, replace-in-place) → IMPACT/CLEAR (`вибухи`, `чисто`, `зникли`, `відбій`). Details + validation: BEHAVIOR.md. |
+| 20 | Context assembly | Per-channel burst (messages ≤45 s apart concatenated), per-channel current-type memory (≤3 min), reply-chain inheritance. Non-Kyiv launches = separate log-only events. Counts = max over channels of each channel's own number, shown as `≥N`. Resound ≤ once per 2 min per event. |
+| 18 | Tests | Rules engine replays `research/samples-*` and profile examples. |
+
+## Open items for the plan phase
+- Telethon only pushes updates for dialogs the account has joined → the account must join all channels. Decide personal vs dedicated Telegram account: a ban/session invalidation kills the notifier, and the session file on the home box is full account access — protect that volume.
+- Self-hosted ntfy + iPhone needs `upstream-base-url: https://ntfy.sh` (APNS relay); Android app should use instant-delivery mode. Check family phone OSes.
+- Corpus: `samples-2026-08-30/<channel>.jsonl` — 20–30 Aug, ~6.9k messages across 5 channels incl. two ballistic events (21 Aug 21:56–22:02, 22 Aug 08:37–08:45). Primary fixture set for the rules engine.
+- Live test: Copilot SDK model list + whether a prompt consumes AI Credits on the user's plan.
+- User fills `home` / `nearby` sets and initial weights.
+- Global type vocabulary seed: drone `реактив|реактБпЛА|шахед|мопед|БпЛА|🛵|🏍|🅿️`, ballistic `баліст|☄️`, cruise `Бандероль|мгКР|мКР|КР`, KAB `КАБ`, clear `чисто|збит|зник|відбій`.
+- Bump pattern (identical text re-posted as reply) must not create a new event.

@@ -1,0 +1,16 @@
+# secrets / runtime state
+.env
+*.session
+*.session-journal
+*.db
+*.sqlite*
+data/
+
+# research scratch (superseded by *.jsonl corpus)
+research/samples-*/*.html
+research/samples-*/sim_*.txt
+
+# python
+__pycache__/
+*.pyc
+.venv/
