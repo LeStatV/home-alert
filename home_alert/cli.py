@@ -8,6 +8,8 @@ from pathlib import Path
 
 import yaml
 
+from telethon import TelegramClient
+
 from . import events, notify, profiles, reader, store
 
 
@@ -35,8 +37,6 @@ def replay(args, config):
 def run(args, config):
     """Live Telegram in, ntfy out. First start prompts for the login; after that the
     session file on the data volume is the login."""
-    from telethon import TelegramClient      # only the live path needs it
-
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     # Telethon's own DEBUG logs carry request payloads and session state; INFO and
@@ -49,6 +49,8 @@ def run(args, config):
     client = TelegramClient(config["telegram"]["session"],
                             int(os.environ["TG_API_ID"]), os.environ["TG_API_HASH"])
     with client:      # prompts for phone + code on first start, reuses the session after
+        # `client.loop` is Telethon 1.x's own loop handle; fine on the pinned 3.12, and
+        # it is what goes when Telethon 2 drops it.
         client.loop.run_until_complete(reader.run(client, channels, pipeline.feed))
 
 

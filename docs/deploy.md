@@ -26,7 +26,9 @@ in `./data`.
 
     mkdir -p data && chmod 700 data
     docker compose up -d ntfy
-    # provision users and the agent token -- the commands are in ntfy/server.yml
+    # provision users, per-topic access and the agent token: the exact commands are
+    # listed in ntfy/server.yml (one `ntfy access` command per topic -- it takes a
+    # single topic, never a comma list)
     docker compose run --rm -it agent     # asks for phone number + login code, once
     docker compose up -d
 

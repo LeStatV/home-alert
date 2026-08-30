@@ -20,11 +20,15 @@ class Store:
     def __init__(self, path=":memory:"):
         self.db = sqlite3.connect(path)
         self.db.executescript(SCHEMA)
+        if "edited" not in {row[1] for row in self.db.execute("pragma table_info(messages)")}:
+            self.db.execute("alter table messages add column edited integer default 0")
 
     def record(self, message, parse, event, pushes):
         with self.db:
             self.db.execute(
-                "insert or replace into messages values (?,?,?,?,?,?,?)",
+                "insert or replace into messages "
+                "(channel, msg_id, time, reply_to, text, parse, edited) "
+                "values (?,?,?,?,?,?,?)",
                 (message.channel, message.id, message.time.isoformat(), message.reply_to,
                  message.text, json.dumps(dataclasses.asdict(parse), ensure_ascii=False),
                  message.edited))
@@ -51,6 +55,8 @@ class Store:
                 (message.text, message.channel, message.id))
             if not edited.rowcount:      # edited before we ever saw the original
                 self.db.execute(
-                    "insert into messages values (?,?,?,?,?,?,1)",
+                    "insert into messages "
+                    "(channel, msg_id, time, reply_to, text, parse, edited) "
+                    "values (?,?,?,?,?,null,1)",
                     (message.channel, message.id, message.time.isoformat(),
-                     message.reply_to, message.text, None))
+                     message.reply_to, message.text))

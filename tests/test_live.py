@@ -107,10 +107,12 @@ def test_a_disconnect_reconnects_and_says_so(caplog):
         async def run_until_disconnected(self):
             await super().run_until_disconnected()
             if self.disconnects > 2:
-                raise SystemExit
+                raise SystemExit          # the operator stopping the agent
+            raise ConnectionError("kaput")   # Telethon 1.44 raises through when it gives up
 
     client = Flaky(["war_monitor"])
     with caplog.at_level("WARNING"), pytest.raises(SystemExit):
         asyncio.run(reader.run(client, ["war_monitor"], lambda m: None, retry_sec=0))
     assert client.connects == 2, "reconnected once per disconnect"
     assert caplog.text.count("reconnecting") == 2
+    assert "ConnectionError" in caplog.text and "kaput" not in caplog.text

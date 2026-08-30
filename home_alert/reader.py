@@ -102,13 +102,20 @@ async def subscribe(client, channels, on_message):
 async def run(client, channels, on_message, retry_sec=5):
     """Follow the channels until the process is stopped.
 
-    Telethon reconnects on its own; `run_until_disconnected` returns only once it has
-    given up, so the loop reconnects and says so. ponytail: a fixed gap, not a growing
-    backoff -- the home server's link comes back in seconds or not at all.
+    Telethon reconnects on its own; `run_until_disconnected` comes back -- by returning
+    or by raising -- only once it has given up, and either way the loop reconnects and
+    says so. Only the exception's type is logged: its text can carry request detail.
+    KeyboardInterrupt and SystemExit are not `Exception` and still stop the agent.
+
+    ponytail: a fixed gap, not a growing backoff -- the home server's link comes back in
+    seconds or not at all.
     """
     await subscribe(client, channels, on_message)
     while True:
-        await client.run_until_disconnected()
-        log.warning("telegram disconnected; reconnecting in %ds", retry_sec)
+        try:
+            await client.run_until_disconnected()
+        except Exception as error:
+            log.warning("telegram connection lost (%s)", type(error).__name__)
+        log.warning("reconnecting in %ds", retry_sec)
         await asyncio.sleep(retry_sec)
         await client.connect()

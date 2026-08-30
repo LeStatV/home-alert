@@ -63,6 +63,9 @@ class Ntfy:
             self.url, data=json.dumps(payload).encode(),
             headers={"Content-Type": "application/json"} |
                     ({"Authorization": f"Bearer {self.token}"} if self.token else {}))
+        # ponytail: blocking, inside the live path's asyncio handler -- an ntfy server
+        # that hangs stalls message processing for up to 5 s per push, mid-raid. The
+        # upgrade is `await asyncio.to_thread(...)` once a sink can be async.
         try:
             with urllib.request.urlopen(request, timeout=5) as response:
                 response.read()

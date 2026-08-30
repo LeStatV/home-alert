@@ -13,6 +13,12 @@ upstream-base-url: https://ntfy.sh
 #   docker compose exec ntfy ntfy user add --role=admin admin
 #   docker compose exec ntfy ntfy user add agent          # the publisher
 #   docker compose exec ntfy ntfy user add family         # the phones
-#   docker compose exec ntfy ntfy access agent  "urgent,all,system" write
-#   docker compose exec ntfy ntfy access family "urgent,all,system" read
+#   one topic per command -- `ntfy access` takes a single topic or wildcard, and a
+#   comma list would create an ACL for a topic named "urgent,all,system":
+#   docker compose exec ntfy ntfy access agent  urgent write
+#   docker compose exec ntfy ntfy access agent  all    write
+#   docker compose exec ntfy ntfy access agent  system write
+#   docker compose exec ntfy ntfy access family urgent read
+#   docker compose exec ntfy ntfy access family all    read
+#   docker compose exec ntfy ntfy access family system read
 #   docker compose exec ntfy ntfy token add agent         # -> NTFY_TOKEN in .env

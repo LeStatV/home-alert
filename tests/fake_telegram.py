@@ -5,6 +5,9 @@ is the same `Message` the replayer feeds, so it can enter the same pipeline.
 """
 from datetime import timezone
 
+from telethon.tl.types import PeerChannel
+from telethon.utils import get_peer_id
+
 from home_alert import reader
 
 
@@ -69,8 +72,9 @@ class FakeClient:
         and Telegram sends an edit as one or the other, never both.
         """
         assert self.handlers and len(set(self.handlers)) == 1, self.handlers
-        await self.handlers[0](
-            FakeEvent(self.entities[handle].id, FakeMessage(message, edit_date)))
+        # the -100-marked form, which is what Telethon puts on `event.chat_id`
+        chat_id = get_peer_id(PeerChannel(self.entities[handle].id))
+        await self.handlers[0](FakeEvent(chat_id, FakeMessage(message, edit_date)))
 
 
 async def feed(client, messages):
