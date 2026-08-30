@@ -128,7 +128,7 @@ def replay(messages, config, sink, store=None):
     context = Context()
     drones = {}          # zone -> the live Drone event there
     sounded = {}         # (zone, tier) -> when it last made a noise, for the cooldowns
-    tracked = {}         # (channel, msg id) -> time, the drone reports a reply may extend
+    tracked = {}         # (channel, msg id) -> (time, zone) of a drone report
 
     for message in messages:
         text = " ".join(message.text.split())
@@ -143,9 +143,9 @@ def replay(messages, config, sink, store=None):
             sink(push)
             pushes.append(push)
 
-        def done():
+        def done(with_event=True):
             if store:
-                store.record(message, parse, event, pushes)
+                store.record(message, parse, event if with_event else None, pushes)
 
         if not text or parse.is_noise:
             done()
@@ -237,9 +237,13 @@ def replay(messages, config, sink, store=None):
         zone = rules.zone(parse.places, home, nearby) if drone_report else None
         if zone:
             tracked = {k: v for k, v in tracked.items()
-                       if message.time - v <= DRONE_WINDOW}
-            chained = (message.channel, message.reply_to) in tracked
-            tracked[(message.channel, message.id)] = message.time
+                       if message.time - v[0] <= DRONE_WINDOW}
+            # progression, not repetition: the channel tracked this drone through some
+            # other zone and now puts it here. Replying to its own report of the same
+            # zone is the same fact again and must not buy a channel its second source.
+            parent = tracked.get((message.channel, message.reply_to))
+            chained = bool(parent) and parent[1] != zone
+            tracked[(message.channel, message.id)] = (message.time, zone)
 
             drone = drones.get(zone)
             fresh = drone is None or message.time - drone.last > DRONE_WINDOW
@@ -259,10 +263,11 @@ def replay(messages, config, sink, store=None):
             if kind != "UPDATE":
                 sounded[(zone, drone.tier)] = message.time
             emit(kind, drone.tier, drone.title, drone.tag)
-            # ponytail: `done()` writes the ballistic event, not this one. Every message
-            # and every push is stored, so a night of drones replays from those two
-            # tables; a drone row of its own is worth adding when something queries it.
-            done()
+            # ponytail: drone events have no row of their own yet, so record no event
+            # rather than the unrelated live ballistic one -- a notifications-to-events
+            # join would otherwise credit these pushes to it. Every message and every
+            # push is stored, so a night of drones still replays from those two tables.
+            done(with_event=False)
             continue
 
         done()

@@ -22,7 +22,10 @@ nearby: [Святошин, Борщагівка, Шулявка, Сирець, �
          Академмістечко, Коцюбинське, Гостомель, Відрадний, Рембаза, Пуща-Водиця]
 
 drone:
-  cooldown_min:      # per tier; gates sounds only, body updates stay unlimited
+  cooldown_min:      # per tier; gates sounds only, body updates stay unlimited.
+                     # Kept per (zone, tier) rather than per tier alone -- a documented
+                     # deviation (#12): a WATCH for the ring must not silence a WATCH
+                     # for the house one minute later.
     URGENT: 5
     WATCH: 10
     INFO: 20

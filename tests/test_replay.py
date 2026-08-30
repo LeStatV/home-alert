@@ -1,3 +1,9 @@
+import json
+from datetime import datetime
+from unittest import mock
+
+from home_alert import notify
+from home_alert.notify import Push
 from harness import audible, replay, sounds
 
 
@@ -235,14 +241,18 @@ def test_28_aug_every_home_pass_of_the_worst_night_rings_the_phone():
     05:09, 05:41, 07:08, 07:55) rings, and nothing between them does -- the reports
     inside one pass are body updates on the live notification.
 
+    06:31 is the pass war_monitor's loitering marker `🔄 Гостомель` keeps alive: without
+    it the channel's 3-min type memory has expired by the time it posts the untyped
+    `Київ / 2х Нивки Новобіличі, Пріорка` and the pass goes unreported.
+
     05:09 is the WATCH-then-promotion case: AerisRimor (w=0.7) alone says
     `2 реактива Оболонь - Нивки київ.` and that is a WATCH; nebo_raketa's bare `Нивки`
     41 s later is the second source that makes it URGENT. 07:55 is reply-chain
     progression: AerisRimor's lone `Антонов.` is a reply into the chain it has been
     tracking the drone through, so 0.7 is enough on its own.
 
-    BEHAVIOR.md's ninth alarm of that day is `Нивки реактив!` at 15:28 -- outside this
-    slice. Eight passes fall in 00:30-08:00 and eight sound.
+    Nine passes, nine sounds -- the night BEHAVIOR.md describes as "9 alarms between
+    00:35 and 07:55".
     """
     assert audible("2026-08-28T00-30_08-00") == [
         ("00:35:53", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
@@ -256,6 +266,7 @@ def test_28_aug_every_home_pass_of_the_worst_night_rings_the_phone():
         ("05:41:12", "NEW", "WATCH", "БпЛА поруч"),
         ("05:41:58", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
         ("06:17:12", "NEW", "WATCH", "БпЛА поруч"),
+        ("06:31:29", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
         ("07:05:30", "NEW", "WATCH", "БпЛА поруч"),
         ("07:08:12", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
         ("07:51:24", "NEW", "WATCH", "БпЛА поруч"),
@@ -266,7 +277,7 @@ def test_28_aug_every_home_pass_of_the_worst_night_rings_the_phone():
 def test_28_aug_the_cooldown_changes_the_sounds_and_nothing_else():
     """The lever the owner gets for "nine alarms in seven hours" (SPEC story 33) is the
     per-tier cooldown, and it is the only thing that moves: same fixture, same rules,
-    a wider URGENT cooldown, and the phone rings four times instead of eight. The
+    a wider URGENT cooldown, and the phone rings five times instead of nine. The
     notification count is identical -- the passes that no longer ring still update the
     body in place, so the shade is as current either way.
     """
@@ -275,7 +286,8 @@ def test_28_aug_the_cooldown_changes_the_sounds_and_nothing_else():
         ("00:35:53", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
         ("02:17:14", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
         ("05:10:18", "PROMOTE", "URGENT", "БпЛА НАД ДОМОМ"),
-        ("07:08:12", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("06:31:29", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("07:55:39", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
     ]
     assert (len(replay("2026-08-28T00-30_08-00", cooldown_min={"URGENT": 60}))
             == len(replay("2026-08-28T00-30_08-00")))
@@ -319,4 +331,24 @@ def test_an_aggregator_echo_is_half_a_source_and_a_fresh_report_is_whole():
     assert sounds("synthetic-echo-is-half-a-source") == [
         ("03:30:00", "NEW", "WATCH", "БпЛА над домом — одне джерело"),
         ("03:31:00", "PROMOTE", "URGENT", "БпЛА НАД ДОМОМ"),
+    ]
+
+
+def test_the_ntfy_boundary_never_makes_an_info_or_an_update_audible():
+    """The tier-to-priority mapping is what "INFO never sounds" actually rests on, so
+    assert it where the household's phone sees it: INFO is 2 and a body update is 1,
+    both below the threshold that rings anything, while URGENT is 5 and bypasses DND."""
+    sent = []
+    ntfy = notify.Ntfy({"url": "https://ntfy.example.net",
+                        "topics": {"URGENT": "urgent", "WATCH": "all", "INFO": "all"}})
+    with mock.patch.object(notify.urllib.request, "urlopen") as urlopen:
+        urlopen.side_effect = lambda request, timeout=None: sent.append(
+            json.loads(request.data)) or mock.MagicMock()
+        for kind in ("NEW", "UPDATE"):
+            for tier in ("URGENT", "WATCH", "INFO"):
+                ntfy(Push(datetime(2026, 8, 28, 2, 17), kind, tier, "t", "b", "tag"))
+
+    assert [(p["topic"], p["priority"]) for p in sent] == [
+        ("urgent", 5), ("all", 4), ("all", 2),      # NEW: URGENT bypasses DND, INFO silent
+        ("urgent", 1), ("all", 1), ("all", 1),      # UPDATE: a body update never sounds
     ]
