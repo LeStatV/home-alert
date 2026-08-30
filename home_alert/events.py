@@ -10,7 +10,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
-from . import profiles, rules
+from . import llm as enrichment, profiles, rules
 from .context import Context
 from .notify import SYSTEM_TOPIC, Push
 
@@ -189,8 +189,11 @@ class Pipeline:
     downstream of this point knows which of the two it is talking to.
     """
 
-    def __init__(self, config, sink, store=None):
+    def __init__(self, config, sink, store=None, enricher=None):
         self.channels = profiles.load(config["profiles"])
+        # the optional second opinion: `llm.provider: none` (the default) is no client
+        # at all, and every path below is written to work without one
+        self.enricher = enricher or enrichment.client(config.get("llm"))
         self.resound_gap = timedelta(minutes=config["ballistic"]["resound_gap_min"])
         self.home, self.nearby = set(config["home"]), set(config["nearby"])
         self.cooldown = {tier: timedelta(minutes=minutes)
@@ -371,6 +374,24 @@ class Pipeline:
         parse = in_context
         threat_type = threat_type or profile.default_type
 
+        # -- the optional second opinion, on the leftovers only (SPEC story 29). A
+        # launch call, a threat declaration and a ballistic word all type themselves
+        # through `rules.type_of`, so the launch path can never reach this line --
+        # which is the whole of story 32. Anything the provider says is folded in
+        # upwards or not at all, and a provider that is slow, down or talking nonsense
+        # leaves the rules verdict exactly where it was.
+        #
+        # ponytail: synchronous, like the ntfy push -- live, this blocks the Telethon
+        # handler for up to `llm.TIMEOUT` (3 s) on a message nothing else could type.
+        # That is the ceiling the spec accepts for exactly these messages and for no
+        # others; `await asyncio.to_thread(...)` is the upgrade when the handler grows
+        # a queue.
+        if self.enricher and enrichment.unresolved(parse, threat_type):
+            parse = enrichment.merge(parse, self.enricher.enrich(message, parse))
+            # deliberately not written into `self.context`: the model typed this one
+            # message, not the next twenty bare place names from the channel
+            threat_type = rules.type_of(parse)
+
         # the message clock closes stale events and expires unconfirmed launches
         for etype, stale in list(self.live.items()):
             if (message.time - stale.last_launch > EVENT_TTL
@@ -513,8 +534,8 @@ class Pipeline:
         done()
 
 
-def replay(messages, config, sink, store=None):
+def replay(messages, config, sink, store=None, enricher=None):
     """Feed messages through the rules and push what the household would have seen."""
-    pipeline = Pipeline(config, sink, store)
+    pipeline = Pipeline(config, sink, store, enricher)
     for message in messages:
         pipeline.feed(message)

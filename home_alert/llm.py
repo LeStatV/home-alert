@@ -61,6 +61,20 @@ def read(answer):
 FLAGS = {"drone": "is_drone", "missile": "names_missile", "ballistic": "names_ballistic"}
 
 
+def unresolved(parse, kind):
+    """Is this a message nothing deterministic could type -- the only kind the model
+    is ever shown (SPEC story 29)?
+
+    `kind` is what context resolved: the message's own words, its reply parent, the
+    channel's 3-minute memory or its `default_type`. A launch call, a declared threat
+    and a ballistic word all type themselves through `rules.type_of`, so none of them
+    can reach the provider -- the launch path stays rules-only (story 32). An
+    all-clear is excluded too: there is no tier to raise and the free tiers this runs
+    on are rate-limited in requests per minute.
+    """
+    return kind is None and rules.type_of(parse) is None and not parse.is_clear
+
+
 def merge(parse, enrichment):
     """The rules verdict with the model's answer folded in -- upwards only.
 

@@ -6,14 +6,16 @@ is the whole point of the contract: switching provider is a config line (SPEC 28
 import contextlib
 import json
 import sys
+import time
 from datetime import datetime
-from types import SimpleNamespace
 from unittest import mock
 
 import pytest
+import yaml
 
-from home_alert import llm, rules
+from home_alert import events, llm, reader, rules, store
 from home_alert.reader import Message
+from harness import FIXTURES, ROOT, replay
 
 MESSAGE = Message("AerisRimor", 1, datetime(2026, 8, 28, 0, 54, 16), None,
                   "Йде Виноградар на Антонов!")
@@ -177,3 +179,93 @@ def test_the_api_key_comes_from_the_named_env_var_and_never_from_the_config(monk
     assert request.headers["Authorization"] == "Bearer sk-secret"
     assert "sk-secret" not in fake.calls[0]["prompt"]
     assert "sk-secret" not in request.data.decode()
+
+
+# -- the pipeline hook, at seam 1: fixture in at the reader boundary, pushes out at
+# the sink. The provider is a fake transport under the real `llm.Client`, so the
+# fail-open under test is the one that ships.
+
+
+class FakeProvider(llm.Client):
+    """A canned provider: one answer for every message, or an error, or a slow one.
+
+    It is a `Client` and not a mock of one -- the prompt, the JSON reading and the
+    fail-open are the shipped code, and only the transport is fake.
+    """
+
+    def __init__(self, answer, log=None, delay=0.0):
+        self.answer, self.log, self.delay = answer, log if log is not None else [], delay
+
+    def complete(self, prompt, timeout):
+        self.log.append(("llm", prompt.splitlines()[1]))
+        if self.delay:
+            time.sleep(self.delay)
+        if isinstance(self.answer, Exception):
+            raise self.answer
+        return self.answer(prompt) if callable(self.answer) else self.answer
+
+
+def run(fixture, provider=None, log=None):
+    """The fixture through the pipeline with this provider; the push tuples out."""
+    config = yaml.safe_load((ROOT / "config.yaml").read_text())
+    config["profiles"] = ROOT / "profiles"
+    pushes = []
+
+    def sink(push):
+        pushes.append(push)
+        if log is not None:
+            log.append(("push", push.kind, push.tier, push.title))
+
+    events.replay(reader.read_corpus(FIXTURES / f"{fixture}.jsonl"), config, sink,
+                  store.Store(":memory:"), enricher=provider)
+    return [(f"{p.time:%H:%M:%S}", p.kind, p.tier, p.title) for p in pushes]
+
+
+FIXTURE_NAMES = sorted(path.stem for path in FIXTURES.glob("*.jsonl"))
+
+
+@pytest.mark.parametrize("fixture", FIXTURE_NAMES)
+def test_a_provider_that_is_down_changes_no_scenario_at_all(fixture):
+    """SPEC story 37 and the seam-1 degradation case, over every scenario there is:
+    the provider raises on every call and the household is sent exactly what the
+    rules alone would have sent, at exactly the same times."""
+    assert run(fixture, FakeProvider(TimeoutError("timed out"))) == replay(fixture)
+
+
+def test_a_slow_provider_delays_nothing_and_changes_nothing():
+    """The 21 Aug ballistic slice against a provider that takes its time and then
+    does not answer -- which is what a 3 s budget running out looks like from here.
+    Same sequence, same timings: the launch path never asked it anything anyway."""
+    assert run("2026-08-21T21-54_22-06",
+               FakeProvider(TimeoutError("timed out"), delay=0.01)) \
+        == replay("2026-08-21T21-54_22-06")
+
+
+def test_a_launch_is_pushed_without_the_provider_ever_being_asked():
+    """SPEC story 32: a launch is rules and ntfy, nothing else. The cold burst is four
+    launch calls and three URGENT pushes -- and not one provider call before, between
+    or after them."""
+    log = []
+    pushes = run("synthetic-cold-launch-burst", FakeProvider(ANSWER, log=log), log=log)
+    assert pushes == replay("synthetic-cold-launch-burst")
+    assert log == [("push", "NEW", "URGENT", "БАЛІСТИКА на Київ"),
+                   ("push", "UPDATE", "URGENT", "БАЛІСТИКА на Київ"),
+                   ("push", "NEW", "URGENT", "БАЛІСТИКА на Київ")]
+
+
+def test_a_canned_answer_raises_an_unparsed_message_to_the_drone_tier():
+    """SYNTHETIC fixture. `Знову над нами кружляє.` names no type and no place the
+    gazetteer knows, so the rules push nothing at all. The model reads it as a drone
+    over Антонов; war_monitor is w=0.9, so that is the tier the rules would have given
+    the same report -- URGENT, over the home set.
+
+    The second line is the check on the other side: a bare `Оболонь.` from the same
+    channel 30 s later pushes nothing. The model's verdict enriched one message; it
+    never entered the channel's 3-minute type memory, where it would have retyped
+    every bare place name that followed.
+    """
+    assert run("synthetic-llm-types-an-unparsed-report") == []
+    model = FakeProvider(lambda prompt: '{"type": "drone", "places": ["Антонов"]}'
+                         if "кружляє" in prompt else '{"type": null, "places": ["Оболонь"]}')
+    assert run("synthetic-llm-types-an-unparsed-report", model) == [
+        ("00:54:16", "NEW", "URGENT", "БпЛА НАД ДОМОМ")]
