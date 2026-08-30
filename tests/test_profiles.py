@@ -7,8 +7,10 @@ example actually lists, so a count-only example says nothing about the rest.
 """
 from datetime import datetime
 
+import pytest
+
 from harness import ROOT
-from home_alert import profiles
+from home_alert import profiles, rules
 
 PROFILES = profiles.load(ROOT / "profiles")
 
@@ -30,3 +32,39 @@ def test_kyiv_nebo_is_expected_to_be_silent_in_its_pre_dawn_blackout():
     assert not silent(datetime(2026, 8, 28, 2, 59))
     assert not silent(datetime(2026, 8, 28, 7, 0))
     assert not PROFILES["war_monitor"].expected_silent(datetime(2026, 8, 28, 5, 42))
+
+
+# The global vocabulary lives in `rules.py`, so no profile carries its examples. This is
+# the table for it. `файна таун` is spec-mandated (SPEC Geometry: ЖК Файна Таун stands in
+# the Антонов airspace) and appears nowhere in the corpus -- the one example here that is
+# not a verbatim corpus message.
+GLOBAL = [
+    {"text": "Файна таун", "places": ["Антонов"], "type": None, "stage": "trajectory"},
+]
+
+
+def examples():
+    for example in GLOBAL:
+        yield pytest.param(None, example, id=f"global:{example['text'][:40]}")
+    for channel, profile in sorted(PROFILES.items()):
+        for example in profile.examples:
+            yield pytest.param(profile, example, id=f"{channel}:{example['text'][:40]}")
+
+
+@pytest.mark.parametrize("profile,example", list(examples()))
+def test_profile_example(profile, example):
+    """One labelled message from a profile, through the classifier and out.
+
+    Only the fields the example lists are asserted -- a count-only example says
+    nothing about places, and a noise example says nothing at all about type.
+    `profile` is None for the global vocabulary table."""
+    parse = rules.classify(example["text"], profile)
+    got = {"type": rules.type_of(parse, profile.default_type if profile else None),
+           "stage": rules.stage(parse),
+           "places": list(parse.places),
+           "count": parse.count,
+           "noise": parse.is_noise}
+    listed = set(example) - {"text"}
+    assert listed and listed <= set(got), f"unknown field(s) in example: {listed - set(got)}"
+    assert {field: got[field] for field in listed} == {field: example[field]
+                                                       for field in listed}

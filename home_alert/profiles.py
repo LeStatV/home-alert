@@ -13,6 +13,8 @@ from pathlib import Path
 
 import yaml
 
+from .rules import VOCAB
+
 # every key a profile may carry; anything else is a typo, and a typo'd weight or
 # noise pattern would fail silently on the alert path
 KEYS = {"channel", "title", "weight", "language", "threads_by_reply", "default_type",
@@ -56,14 +58,17 @@ def load(directory):
         unknown = set(raw) - KEYS
         assert not unknown, f"{file.name}: unknown key(s) {sorted(unknown)}"
         assert raw.get("channel", file.stem) == file.stem, f"{file.name}: channel mismatch"
+        vocab = raw.get("type_vocab") or {}
+        assert set(vocab) <= set(VOCAB), (
+            f"{file.name}: type_vocab extends nothing in rules.VOCAB: "
+            f"{sorted(set(vocab) - set(VOCAB))}")
         loaded[file.stem] = Profile(
             channel=file.stem,
             weight=float(raw["weight"]),
             default_type=raw.get("default_type"),
             quiet_hours=tuple(_window(w) for w in raw.get("quiet_hours") or ()),
             noise=_compile(raw.get("noise_patterns")),
-            vocab={name: _compile(patterns)
-                   for name, patterns in (raw.get("type_vocab") or {}).items()},
+            vocab={name: _compile(patterns) for name, patterns in vocab.items()},
             aliases={stem: canonical
                      for canonical, stems in (raw.get("place_aliases") or {}).items()
                      for stem in stems},

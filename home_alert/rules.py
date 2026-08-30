@@ -88,6 +88,21 @@ PLACES = {
 }
 
 
+# the global patterns a profile's `type_vocab` may extend, by name
+VOCAB = {"threat": THREAT, "launch": LAUNCH, "ballistic": BALLISTIC, "missile": MISSILE,
+         "drone": DRONE, "clear": CLEAR, "recon": RECON}
+
+
+def says(name, text, profile):
+    """Does `text` use this vocabulary -- the global words, or this channel's own?
+
+    kyiv_nebo writes `Більше не летить` where everyone else writes `чисто`; the global
+    words stay global (SPEC: "Type vocabulary is global with per-profile extensions").
+    """
+    extra = profile.vocab.get(name) if profile else None
+    return bool(VOCAB[name].search(text)) or bool(extra and extra.search(text))
+
+
 @dataclass(frozen=True, slots=True)
 class Parse:
     places: tuple            # canonical Kyiv-area places named
@@ -107,8 +122,13 @@ class Parse:
     terse: bool
 
 
-def places(text):
-    return tuple(sorted({name for stem, name in PLACES.items() if re.search(stem, text, re.I)}))
+def places(text, profile=None):
+    """Canonical Kyiv-area names this text mentions: the global gazetteer above, plus
+    whatever spellings one channel alone uses (`profiles/<channel>.yaml: place_aliases`).
+    """
+    stems = PLACES | (profile.aliases if profile else {})
+    return tuple(sorted({name for stem, name in stems.items()
+                         if re.search(stem, text, re.I)}))
 
 
 # Ordinals a channel counts its own launches with: «Четверта», «П'ятий, шостий та сьомий»
@@ -134,6 +154,46 @@ def count(text):
     return max(numbers, default=0)
 
 
+def type_of(parse, default=None):
+    """The threat type a message names in its own words, or `default` when it names
+    none -- the channel's `default_type`, since 88% of kyiv_nebo's posts are a bare
+    place name (SPEC "Profiles as data").
+
+    A message carrying both (`🅿️ Одеса 4х мгКР Бандероль над містом.`) is a drone: that
+    is the precedence `events.py` routes launches on. `context.kind` is deliberately
+    *not* this function -- it feeds the 3-min type memory, where a cruise word must not
+    overwrite what the channel has been tracking.
+    """
+    if parse.is_drone:
+        return "drone"
+    if parse.names_missile:
+        return "missile"
+    if parse.is_recon:
+        return "recon"
+    if parse.names_ballistic or parse.is_launch or parse.is_threat:
+        return "ballistic"
+    return default
+
+
+def stage(parse):
+    """Where in the three-stage model a message sits: a declared `threat`, a `launch`
+    call, an impact or all-clear report, or a bare `trajectory` call -- None if it is
+    none of those. A cruise wave launches three ways (SPEC story 11): its own launch
+    wording, a bearing that says Kyiv, or an approach word over a Kyiv place.
+    """
+    if parse.is_threat:
+        return "threat"
+    if parse.is_launch or (type_of(parse) == "missile"
+                           and (parse.is_direction
+                                or (parse.is_approach and parse.places))):
+        return "launch"
+    if parse.is_clear:
+        return "clear"
+    if parse.places:
+        return "trajectory"
+    return None
+
+
 def zone(named, home, nearby):
     """How close to the household a report is: HOME, NEARBY, KYIV, or None.
 
@@ -150,26 +210,27 @@ def zone(named, home, nearby):
 
 
 def classify(text, profile=None):
-    is_threat = bool(THREAT.search(text))
+    is_threat = says("threat", text, profile)
     terse = len(text) <= TERSE
     # a launch call is short, present tense and not an all-clear; the missile approach
     # forms answer to exactly the same three guards
+    is_clear = says("clear", text, profile)
     present = (not is_threat and terse
-               and not PAST.search(text) and not CLEAR.search(text))
+               and not PAST.search(text) and not is_clear)
     return Parse(
-        places=places(text),
+        places=places(text, profile),
         is_threat=is_threat,
-        is_launch=bool(LAUNCH.search(text)) and present,
+        is_launch=says("launch", text, profile) and present,
         is_approach=bool(APPROACH.search(text)) and present,
         is_direction=bool(DIRECTION.search(text)) and present,
-        names_missile=bool(MISSILE.search(text)),
+        names_missile=says("missile", text, profile),
         targets_kyiv=bool(KYIV_TARGET.search(text)),
         count=count(text),
-        names_ballistic=bool(BALLISTIC.search(text)),
+        names_ballistic=says("ballistic", text, profile),
         names_non_kyiv=bool(NON_KYIV.search(text)),
-        is_clear=bool(CLEAR.search(text)),
-        is_drone=bool(DRONE.search(text)),
-        is_recon=bool(RECON.search(text)),
+        is_clear=is_clear,
+        is_drone=says("drone", text, profile),
+        is_recon=says("recon", text, profile),
         is_noise=(bool(NOISE.search(text)) and not BALLISTIC.search(text)
                   or bool(profile and profile.noise and profile.noise.search(text))),
         terse=terse,

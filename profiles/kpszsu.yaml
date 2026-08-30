@@ -10,3 +10,12 @@ noise_patterns:
   # (22 Aug 06:10:34 `⚡️ ЗБИТО/ПОДАВЛЕНО 191 ЦІЛЬ ПРОТИВНИКА`). The slash is what makes
   # this safe: a mid-raid `збито` in a terse post is an impact report and stays one.
   - 'збито\s*/\s*подавлено'
+
+examples:
+  - {text: "🚀 Балістичні ракети на Київ з півночі.", type: ballistic, stage: launch,
+     places: [Київ]}          # 73457, 2026-08-19T20:53:35 -- 70 s after the monitors
+  - {text: "🛵 Реактивний БпЛА через Тернопільщину ➡️ у напрямку Дубно.", type: drone,
+     stage: null, places: []} # 73352, 2026-08-18T15:28:34 -- the official channel covers
+                              # the whole country; nothing here is ours
+  - {text: "⚡️ ЗБИТО/ПОДАВЛЕНО 191 ЦІЛЬ ПРОТИВНИКА", noise: true}
+    # 73939, 2026-08-22T06:10:34 -- first line of the morning digest

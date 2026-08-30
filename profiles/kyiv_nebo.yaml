@@ -14,3 +14,39 @@ default_type: drone
 # It sleeps 06:00-10:00 Kyiv: hourly post counts across 13 days are 0/1/2/2 against 39
 # at 07:00 UTC. A gap in here is the operator asleep, not the agent blind (§6).
 quiet_hours: ["03:00-07:00"]
+
+examples:
+  - {text: "Нивки", type: drone, stage: trajectory, places: [Нивки], count: 0}
+    # 25561, 2026-08-19T22:35:30 -- the whole message, and the reason for default_type
+  - {text: "Нивки, Святошин", type: drone, stage: trajectory, places: [Нивки, Святошин]}
+    # 26061, 2026-08-28T17:40:52 -- the home set and the ring in five characters each
+  - {text: "Борщагівки, Вишневе", type: drone, stage: trajectory,
+     places: [Борщагівка, Вишневе]}          # 25963, 2026-08-28T07:55:16
+  - {text: "Троєщина - уважно", type: drone, stage: trajectory, places: [Троєщина]}
+    # 25500, 2026-08-18T15:30:09
+  - {text: "Реактивний Шахед підлітає до Броварів", type: drone, stage: trajectory,
+     places: [Бровари]}                      # 25564, 2026-08-19T23:54:15
+  - {text: "Цілі на Київ", type: ballistic, stage: launch, places: [Київ]}
+    # 25529, 2026-08-19T20:52:29 -- 12 s after its own threat post
+  - {text: "Загроза балістики з Брянська", type: ballistic, stage: threat, places: []}
+    # 25528, 2026-08-19T20:52:17
+  - {text: "4 Циркони", type: missile, count: 4}
+    # 25532, 2026-08-19T20:56:40 -- a bare count of a named missile: the type and the
+    # figure are the classifier's, the stage is the live event's
+  - {text: "2-3 Бандеролі в бік Києва", type: missile, stage: launch, places: [], count: 3}
+    # 25672, 2026-08-21T22:04:45 -- a bearing on Kyiv: WATCH, never an immediate URGENT
+  - {text: "До 4 ракет", count: 4}
+    # 25530, 2026-08-19T20:53:15 -- during a ballistic wave, but the message says only a
+    # figure; `default_type: drone` would type it wrong, so only the count is asserted
+  - {text: "8 цілей", count: 8}               # 25668, 2026-08-21T22:00:19
+  - {text: "Більше не летить", stage: clear}
+    # 25508, 2026-08-18T16:31:36 -- its own all-clear wording, from `type_vocab` above;
+    # without that extension this reads as a drone report with no place
+
+type_vocab:
+  # its own way of saying "it is over": 32 `Більше не летить` and 25 `Очікуємо на
+  # відбій` in 898 posts, neither of which the global CLEAR words catch. Its third
+  # form, `не фіксується`, stays out: Ukrainian_Intelligence and AerisRimor use it too,
+  # so it is global vocabulary for #4 to add, not this channel's own -- and adding it
+  # here alone turns one 26 Aug KN post into a body update on somebody else's event.
+  clear: ['більше не летить', 'очікуємо на відбо']

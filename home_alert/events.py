@@ -209,7 +209,7 @@ def replay(messages, config, sink, store=None):
                              or (threat_until is not None and message.time <= threat_until))
         # a cruise missile says so in its own words. war_monitor's `Nx ...` house style is
         # not a drone marker: 54 of those posts are KP, KAB and PRR (issue #4 note).
-        missile = parse.names_missile and not parse.is_drone
+        missile = rules.type_of(parse) == "missile"
 
         # -- stage 2: launch. Three ways a cruise wave becomes ours: a bearing that says
         # Kyiv (`у напрямку Києва` -- a WATCH, never an immediate URGENT), an approach
@@ -218,8 +218,7 @@ def replay(messages, config, sink, store=None):
         # city: eleven of those in the corpus (Новий Буг, Оржиця, Козельщина, Канів).
         # A drone report is never a launch, however much it reads like one
         # ("1 Заворичі на вихід" names Київщина and matches the launch vocabulary).
-        launching = parse.is_launch or (missile and (parse.is_direction
-                                                     or (parse.is_approach and parse.places)))
+        launching = rules.stage(parse) == "launch"
         if (launching and (ballistic_context or missile or parse.places)
                 and (parse.names_ballistic or missile or not parse.is_drone)
                 and profile.weight >= LAUNCH_WEIGHT_MIN):
