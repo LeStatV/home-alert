@@ -19,6 +19,22 @@ LAUNCH = re.compile(
     r"|спуск баліст|\bвих[іо]д|пуск баліст|балістичн\w* ракет\w* на|\d+ балістик"
     r"|🚀 ?ще\b|🚀 ?пуск", re.I)
 BALLISTIC = re.compile(r"баліст|балист|☄|іскандер|кинжал", re.I)
+# Cruise and hypersonic missiles (BEHAVIOR.md fix 5). `кр` is war_monitor's and
+# AerisRimor's own shorthand for «крилата ракета»; bare `ракета` is deliberately absent
+# -- kpszsu says it of ballistics too, and it would swallow every ballistic wave.
+MISSILE = re.compile(r"циркон|онікс|оникс|бандерол|х-101|калібр|\bкр\b|крилат", re.I)
+# A Kyiv place plus one of these is "it is coming at us now" -> URGENT (SPEC story 11).
+# `захід` is the entry («Київ захід Цирконів», war_monitor); `курсом на захід` and
+# `західним курсом` are the compass, which is all the other 30 uses in the corpus.
+APPROACH = re.compile(r"підліт|над містом|(?<!на )(?<!курс )\bзахід\b|заліт"
+                      r"|на київ(?!щ|ськ)|на місто", re.I)
+# Only a bearing -> WATCH, never an immediate URGENT. The genitive `Києва` lives here and
+# not in the gazetteer, so `у напрямку Києва` can never promote a pending event by itself.
+DIRECTION = re.compile(r"(напрямк\w*|бік|сторону)\s+(києв|київ)", re.I)
+# Kyiv-gating is on the target, not on every name in the message: a wave `на Київ повз
+# Прилуки, Ніжин` is ours; `Ціль на Ромни!` is somebody else's (SPEC story 12).
+# `на місто` is deliberately absent: war_monitor writes it of Dnipro too.
+KYIV_TARGET = re.compile(r"на київ(?!щ|ськ)|курс(ом)? на київ", re.I)
 CLEAR = re.compile(r"чисто|зникл|втрачен|мінус|відбій|без цілей|вибух", re.I)
 # 🔄 is war_monitor's loitering marker (33 corpus posts, all its own, all drones), the
 # same house style as 🅿️. Its bare `Nх` count prefix is NOT a drone word: 54 terse posts
@@ -71,6 +87,11 @@ class Parse:
     is_launch: bool          # strong launch wording, present tense, short
     names_ballistic: bool    # carries a ballistic word itself
     names_non_kyiv: bool     # names a city we do not cover
+    is_approach: bool        # missile wording for "on its way in": підліт/захід/на Київ
+    is_direction: bool       # missile wording for a bearing only: `у напрямку Києва`
+    names_missile: bool      # a cruise or hypersonic missile, not a ballistic one
+    targets_kyiv: bool       # says Kyiv is the target, whatever else it names
+    count: int               # the largest figure this message states about itself
     is_clear: bool
     is_drone: bool
     is_recon: bool
@@ -80,6 +101,29 @@ class Parse:
 
 def places(text):
     return tuple(sorted({name for stem, name in PLACES.items() if re.search(stem, text, re.I)}))
+
+
+# Ordinals a channel counts its own launches with: «Четверта», «П'ятий, шостий та сьомий»
+ORDINALS = [("перш", 1), ("друг", 2), ("трет", 3), ("четверт", 4), (r"п.?ят", 5),
+            ("шост", 6), ("сьом", 7), ("восьм", 8), (r"дев.?ят", 9)]
+# A digit is a count only where it counts something («5 Цирконів», «4-6 одиниць»,
+# «2х КР») or enumerates («8 та 9»). `02:20`, `20 км` and `13 загиблих` are not.
+COUNTED = re.compile(r"(\d+)(?:\s*[-–]\s*(\d+))?\s*(?:х\b|шт|ракет|ціл|баліст|груп"
+                     r"|одиниц|цирк|калібр|бандерол|онікс|шахед|бпла|дрон|реактив)"
+                     r"|(\d+)\s*(?:та|і|й)\s*(\d+)\b", re.I)
+
+
+def count(text):
+    """The largest figure a message states about itself -- an ordinal or a number.
+
+    Never summed across channels (BEHAVIOR.md fix 2: summing gave «#48» for six
+    missiles). Anything above 20 is a model number, not a count: Х-101, С-400, Ту-95.
+    """
+    numbers = [int(digits) for match in COUNTED.finditer(text)
+               for digits in match.groups() if digits and int(digits) <= 20]
+    numbers += [value for stem, value in ORDINALS
+                if re.search(rf"\b{stem}[аяиіоеу]", text, re.I)]
+    return max(numbers, default=0)
 
 
 def zone(named, home, nearby):
@@ -100,11 +144,19 @@ def zone(named, home, nearby):
 def classify(text):
     is_threat = bool(THREAT.search(text))
     terse = len(text) <= TERSE
+    # a launch call is short, present tense and not an all-clear; the missile approach
+    # forms answer to exactly the same three guards
+    present = (not is_threat and terse
+               and not PAST.search(text) and not CLEAR.search(text))
     return Parse(
         places=places(text),
         is_threat=is_threat,
-        is_launch=bool(LAUNCH.search(text)) and not is_threat and terse
-                  and not PAST.search(text) and not CLEAR.search(text),
+        is_launch=bool(LAUNCH.search(text)) and present,
+        is_approach=bool(APPROACH.search(text)) and present,
+        is_direction=bool(DIRECTION.search(text)) and present,
+        names_missile=bool(MISSILE.search(text)),
+        targets_kyiv=bool(KYIV_TARGET.search(text)),
+        count=count(text),
         names_ballistic=bool(BALLISTIC.search(text)),
         names_non_kyiv=bool(NON_KYIV.search(text)),
         is_clear=bool(CLEAR.search(text)),

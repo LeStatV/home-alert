@@ -1,25 +1,36 @@
 import json
+import re
 from datetime import datetime
 from unittest import mock
 
 from home_alert import notify
 from home_alert.notify import Push
-from harness import audible, replay, sounds
+from harness import audible, bodies, replay, sounds
 
 
 def test_21_aug_ballistic_launch_watch_then_urgent():
     """21 Aug 21:54-22:06: AerisRimor's target-less `ЦІЛЬ` is a WATCH at 21:58:35,
-    promoted to URGENT one second later when Ukrainian_Intelligence names Kyiv."""
+    promoted to URGENT one second later when Ukrainian_Intelligence names Kyiv.
+
+    Four minutes after the ballistic wave is over, a Бандероль cruise wave follows
+    (`3 Бандеролі ... ймовірно на Київ`, `Один Бандероль на Згурівку/Бровари!`,
+    `2-3 Бандеролі в бік Києва`) -- its own event, its own tag, and before #5 it was
+    thirteen silent body updates on the ballistic notification.
+    """
     assert sounds("2026-08-21T21-54_22-06") == [
         ("21:56:24", "NEW", "INFO", "Загроза балістики"),
         ("21:58:35", "NEW", "WATCH", "Пуск балістики, ціль уточнюється"),
         ("21:58:36", "PROMOTE", "URGENT", "БАЛІСТИКА на Київ"),
+        ("22:02:12", "NEW", "URGENT", "КРИЛАТІ РАКЕТИ на Київ"),
+        ("22:04:45", "RESOUND", "URGENT", "КРИЛАТІ РАКЕТИ на Київ"),
     ]
 
 
 def test_21_aug_trajectory_and_impact_never_sound():
-    """Everything after the promotion is a silent body update."""
-    after = [p for p in replay("2026-08-21T21-54_22-06") if p[0] > "21:58:36"]
+    """Everything after the promotion is a silent body update *on the ballistic event*:
+    a cruise wave four minutes later is a separate event and may sound on its own."""
+    after = [p for p in replay("2026-08-21T21-54_22-06")
+             if p[0] > "21:58:36" and p[3] == "БАЛІСТИКА на Київ"]
     assert after, "expected trajectory/impact body updates"
     assert {p[1] for p in after} == {"UPDATE"}
 
@@ -94,14 +105,21 @@ def test_19_aug_ballistic_wave_is_eight_sounds_in_twenty_six_minutes():
     launch message any channel posted. AerisRimor's `ЦІЛЬ` -> `КИЇВ` -> `Балістика` ->
     `На Бровари!!` burst three seconds later resolves into that same event -- never a
     WATCH of its own -- and the seven waves that follow re-sound at most once every two
-    minutes. Eight audible pushes in 26 minutes, the number BEHAVIOR.md measured.
+    minutes. Eight audible ballistic pushes in 26 minutes, the number BEHAVIOR.md
+    measured, and the Zircon wave alongside them is three more on its own event.
+
+    The third ballistic sound moved from 20:58:01 to 20:57:58, kpszsu's `Балістичні
+    ракети на Сумщині, Чернігівщині та Полтавщині курсом на Київ.`: Kyiv-gating is now
+    on the target, so the oblasts a wave crosses no longer suppress a call that says
+    Kyiv is the target. The official channel gets three seconds it used to lose.
 
     The threat declaration at 20:52:17 is INFO: priority 2, silent by spec, not a sound.
     """
-    assert audible("2026-08-19T20-50_21-16") == [
+    assert [p for p in audible("2026-08-19T20-50_21-16")
+            if p[3] == "БАЛІСТИКА на Київ"] == [
         ("20:52:25", "NEW", "URGENT", "БАЛІСТИКА на Київ"),
         ("20:54:40", "RESOUND", "URGENT", "БАЛІСТИКА на Київ"),
-        ("20:58:01", "RESOUND", "URGENT", "БАЛІСТИКА на Київ"),
+        ("20:57:58", "RESOUND", "URGENT", "БАЛІСТИКА на Київ"),
         ("21:00:40", "RESOUND", "URGENT", "БАЛІСТИКА на Київ"),
         ("21:03:16", "RESOUND", "URGENT", "БАЛІСТИКА на Київ"),
         ("21:05:40", "RESOUND", "URGENT", "БАЛІСТИКА на Київ"),
@@ -351,4 +369,115 @@ def test_the_ntfy_boundary_never_makes_an_info_or_an_update_audible():
     assert [(p["topic"], p["priority"]) for p in sent] == [
         ("urgent", 5), ("all", 4), ("all", 2),      # NEW: URGENT bypasses DND, INFO silent
         ("urgent", 1), ("all", 1), ("all", 1),      # UPDATE: a body update never sounds
+    ]
+
+
+def test_20_aug_cruise_missiles_watch_on_direction_then_urgent_on_approach():
+    """20 Aug 02:20-02:30: a cruise-missile wave crosses Полтавщина/Чернігівщина and
+    turns on Kyiv. war_monitor's `3 групи КР повз Переяслав у напрямку Києва` names a
+    direction and no target, so it is a WATCH; AerisRimor's `БРОВАРИ ПІДЛІТ КР!` 63 s
+    later names a Kyiv-oblast place with an approach word and promotes it to URGENT --
+    the 2-3 minute budget before the first group is over the city.
+
+    Before this, every one of those messages read as a drone body update (AerisRimor's
+    `єППО на реактивні БПЛА і КР` had set the channel's type to drone), so the whole
+    cruise approach arrived silent at priority 2.
+    """
+    assert sounds("2026-08-20T02-20_02-30") == [
+        ("02:20:45", "NEW", "INFO", "БпЛА над Києвом"),
+        ("02:26:37", "NEW", "WATCH", "Пуск ракет, ціль уточнюється"),
+        ("02:27:40", "PROMOTE", "URGENT", "КРИЛАТІ РАКЕТИ на Київ"),
+    ]
+
+
+def test_19_aug_zircon_wave_is_a_watch_then_an_urgent_with_the_count_it_was_given():
+    """19 Aug 20:55-21:04: while the ballistic waves are still coming, Zircons launch
+    from Курськ, Воронеж and Ростов. war_monitor's `Вихід другого Циркону, Курськ.`
+    names no target and opens a missile WATCH at 20:56:34; Ukrainian_Intelligence's
+    `5 Цирконів на Київ повз Прилуки, Ніжин та Пирятин` promotes it 66 s later --
+    a launch that transits three other oblasts but says Kyiv is the target.
+
+    The count is that channel's own figure, shown `>=5`, and it rises to `>=7` when
+    war_monitor says `П'ятий, шостий та сьомий` -- never the sum of the two (SPEC 23).
+    Before #5 every one of these pushed nothing at all: `5 Цирконів на Київ` was
+    suppressed by the oblasts it flew over, and the rest were silent body updates on
+    the ballistic notification.
+    """
+    zircons = [p for p in bodies("2026-08-19T20-50_21-16")
+               if p[3] in ("Пуск ракет, ціль уточнюється", "КРИЛАТІ РАКЕТИ на Київ")
+               and p[1] != "UPDATE"]
+    assert [p[:4] for p in zircons] == [
+        ("20:56:34", "NEW", "WATCH", "Пуск ракет, ціль уточнюється"),
+        ("20:57:40", "PROMOTE", "URGENT", "КРИЛАТІ РАКЕТИ на Київ"),
+        ("21:03:10", "RESOUND", "URGENT", "КРИЛАТІ РАКЕТИ на Київ"),
+    ]
+    assert zircons[1][4].startswith("≥5 ")
+    assert zircons[2][4].startswith("≥7 ")
+
+
+def test_19_aug_a_count_is_the_best_single_source_not_the_sum_of_five():
+    """Five channels report launches into the 19 Aug Kyiv ballistic event and each
+    counts the same missiles again: AerisRimor reaches `4 цілі`, kyiv_nebo `До 4 ракет`,
+    Ukrainian_Intelligence `Ще 2`, war_monitor `Перша ... Сьома` and then `8 та 9`.
+    Summing them is how the prototype printed `#48` for six missiles (BEHAVIOR.md
+    fix 2). The largest figure any one channel gave is war_monitor's 9, and no push
+    in the whole slice ever shows more than that.
+    """
+    shown = [int(re.match(r"≥(\d+)", p[4]).group(1))
+             for p in bodies("2026-08-19T20-50_21-16") if p[4].startswith("≥")]
+    assert shown, "expected counted pushes"
+    assert max(shown) == 9
+    reporting = {p[4].split(":")[0].split("· ")[-1] for p in bodies("2026-08-19T20-50_21-16")
+                 if p[3] == "БАЛІСТИКА на Київ"}
+    assert len(reporting) >= 5, reporting
+
+
+def test_19_aug_a_launch_on_another_city_neither_sounds_nor_changes_the_count():
+    """`Ціль на Ромни!` and `ЛУБНИ ЦІЛЬ!` arrive 40 s apart in the middle of a live
+    Kyiv ballistic event and a live Zircon event. They open a log-only event of their
+    own: no push at all, and the count on either Kyiv notification is the same one
+    push before them as one push after (SPEC story 12)."""
+    pushes = bodies("2026-08-19T20-50_21-16")
+    assert [p for p in pushes if p[0] in ("20:57:11", "20:57:12", "20:57:15")] == []
+    ballistic = [p for p in pushes if p[3] == "БАЛІСТИКА на Київ"]
+    before = [p for p in ballistic if p[0] < "20:57:11"][-1]
+    after = [p for p in ballistic if p[0] > "20:57:15"][0]
+    assert before[4].startswith("≥4 ") and after[4].startswith("≥4 ")
+
+
+def test_21_aug_a_relaunched_call_never_rings_twice_and_the_tail_wakes_nobody():
+    """21 Aug 22:12-22:29, the end of the Бандероль wave. Two things must hold.
+
+    nebo_raketa posts `Нові два Бандеролі залітаються на Згурівку у бік Броварів` at
+    22:12:06 -- an approach word over Бровари, so URGENT -- and re-posts it verbatim as
+    a reply 3 m 30 s later. `context` no longer recognises the bump: its parent left the
+    3-min window. The event does, because the launch call it last folded in is the same
+    string, so 22:15:36 is a body update and the phone stays quiet.
+
+    Then the last one turns away down the Dnipro and AerisRimor calls `Канів підліт 5хв
+    Бандероль.` twice. `підліт` is the word that wakes the house when it comes with a
+    Kyiv place; with Канів and Черкащина it is somebody else's five minutes (story 12).
+    """
+    assert replay("2026-08-21T22-12_22-29") == [
+        ("22:12:06", "NEW", "URGENT", "КРИЛАТІ РАКЕТИ на Київ"),
+        ("22:14:51", "NEW", "INFO", "БпЛА над Києвом"),
+        ("22:15:21", "UPDATE", "INFO", "БпЛА над Києвом"),
+        ("22:15:36", "UPDATE", "URGENT", "КРИЛАТІ РАКЕТИ на Київ"),
+        ("22:18:42", "UPDATE", "INFO", "БпЛА над Києвом"),
+        ("22:22:42", "UPDATE", "INFO", "БпЛА над Києвом"),
+    ]
+    assert [p for p in audible("2026-08-21T22-12_22-29") if p[0] > "22:12:06"] == []
+
+
+def test_21_aug_a_bearing_on_kyiv_survives_the_oblasts_the_wave_crosses():
+    """21 Aug 23:35-23:45: kpszsu (w=1.0) posts `Чернігівщина: "Бандероль" повз Ічню у
+    напрямку Київщини.` -- the only Kyiv-ward signal any channel gives that night before
+    the wave reaches Бровари twelve minutes later. It names Чернігівщина, so a gate on
+    "names another city" would file it as somebody else's launch and push nothing.
+
+    Kyiv-gating is on the target, and a bearing that says Kyiv is a target statement:
+    WATCH, never an immediate URGENT (SPEC story 11).
+    """
+    assert replay("2026-08-21T23-35_23-45") == [
+        ("23:39:15", "NEW", "WATCH", "Пуск ракет, ціль уточнюється"),
     ]
