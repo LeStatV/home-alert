@@ -74,5 +74,6 @@ anonymous subscriber sees nothing.
 The `system` topic should show `Агент запущено` within seconds of the start, then
 `Агент працює` every `system.heartbeat_min` minutes (one entry, replaced in place).
 
-`home-alert replay <from> <to> --db data/home-alert.db` re-runs the rules over what
-was stored.
+`home-alert replay <from> <to> --db data/home-alert.db --from-db` re-runs the current
+rules over what the agent stored that night and prints what it would send now. Without
+`--from-db` the same command replays the research corpus and records into that file.

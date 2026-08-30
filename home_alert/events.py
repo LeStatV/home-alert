@@ -344,7 +344,7 @@ class Pipeline:
 
         def done(event=None):
             if self.store:
-                self.store.record(message, parse, event, pushes)
+                self.store.record(message, parse, event, pushes, self.siren)
 
         if not text or parse.is_noise:
             done()

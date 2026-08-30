@@ -3,9 +3,11 @@ import re
 from datetime import datetime
 from unittest import mock
 
-from home_alert import notify
+import yaml
+
+from home_alert import cli, events, notify, reader, store
 from home_alert.notify import Push
-from harness import audible, bodies, replay, sent, sounds
+from harness import FIXTURES, ROOT, audible, bodies, replay, sent, sounds
 
 
 def test_21_aug_ballistic_launch_watch_then_urgent():
@@ -511,10 +513,11 @@ def test_the_kyiv_siren_is_a_signal_in_every_push_and_never_a_gate():
     pushes = bodies("synthetic-siren-signal")
     assert [p[:4] for p in pushes] == [
         ("04:00:30", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("04:02:00", "NEW", "URGENT", "БАЛІСТИКА на Київ"),
         ("04:05:00", "UPDATE", "URGENT", "БпЛА НАД ДОМОМ"),
     ]
     assert "🔴" in pushes[0][4], pushes[0][4]
-    assert "🟢" in pushes[1][4], pushes[1][4]
+    assert "🟢" in pushes[2][4], pushes[2][4]
 
 
 def test_28_aug_the_body_carries_the_chain_its_sources_and_the_age_of_the_report():
@@ -649,3 +652,51 @@ def test_the_system_topic_warns_when_every_channel_goes_quiet_under_a_siren():
     assert pushes[1].topic == "system"
     assert "kyiv_nebo" not in pushes[1].body, pushes[1].body
     assert "war_monitor" in pushes[1].body, pushes[1].body
+
+
+def test_the_siren_state_is_stored_on_the_event(tmp_path):
+    """Not just shown: kept, so the household can later ask how often an URGENT beat
+    the siren (SPEC story 24). The events table is where the answer will come from.
+    Read here at the store because that is the boundary the criterion names."""
+    saved = store.Store(str(tmp_path / "home-alert.db"))
+    config = yaml.safe_load((ROOT / "config.yaml").read_text())
+    config["profiles"] = ROOT / "profiles"
+    events.replay(reader.read_corpus(FIXTURES / "synthetic-siren-signal.jsonl"),
+                  config, notify.Recorder(), saved)
+    assert saved.db.execute("select title, siren from events").fetchall() == [
+        ("БАЛІСТИКА на Київ", "on")]
+
+
+def test_replay_over_the_live_database_reproduces_the_recorded_pushes(tmp_path, capsys,
+                                                                     monkeypatch):
+    """SPEC story 34 against the live trail instead of the corpus. Everything the agent
+    receives is stored, so any night can be re-run through the current rules straight
+    out of `data/home-alert.db` -- and re-running a night nobody has changed the rules
+    for must reproduce, push for push, what the household was actually sent.
+
+    The notifications table is the household's copy of that; comparing to it is the
+    criterion's own boundary.
+    """
+    db = str(tmp_path / "home-alert.db")
+    config = yaml.safe_load((ROOT / "config.yaml").read_text())
+    config["profiles"] = ROOT / "profiles"
+
+    live = store.Store(db)          # pass 1: a night, as `run` would have written it
+    events.replay(reader.read_corpus(FIXTURES / "2026-08-27T00-00_00-30.jsonl"),
+                  config, notify.Recorder(), live)
+
+    again = notify.Recorder()       # pass 2: the same night, back out of the store
+    events.replay(live.messages(datetime(2026, 8, 27), datetime(2026, 8, 28)),
+                  config, again, store.Store(":memory:"))
+
+    assert again.pushes, "expected the stored night to push something"
+    assert [(p.time.isoformat(), p.kind, p.tier, p.title) for p in again.pushes] == \
+        live.db.execute("select time, kind, tier, title from notifications").fetchall()
+
+    monkeypatch.chdir(ROOT)         # and the same thing through the command line
+    capsys.readouterr()
+    assert cli.main(["replay", "2026-08-27T00:00", "2026-08-27T00:30",
+                     "--db", db, "--from-db"]) == 0
+    printed = capsys.readouterr().out
+    assert printed.splitlines()[0].endswith("2026-08-27T00:00 .. 2026-08-27T00:30")
+    assert "БАЛІСТИКА на Київ" in printed
