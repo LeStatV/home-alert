@@ -1,0 +1,5 @@
+channel: Ukrainian_Intelligence
+title: "Розвідка України"
+weight: 0.6
+language: uk
+threads_by_reply: true   # 33% of posts are replies

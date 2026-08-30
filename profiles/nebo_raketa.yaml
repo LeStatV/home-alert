@@ -1,0 +1,5 @@
+channel: nebo_raketa
+title: "Небо ракета"
+weight: 0.8
+language: uk
+threads_by_reply: true   # 50% of posts are replies -- the most threaded channel

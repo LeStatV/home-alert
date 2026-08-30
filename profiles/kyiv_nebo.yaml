@@ -1,0 +1,16 @@
+channel: kyiv_nebo
+title: "Київське небо 🌌"
+weight: 0.6              # channel-eval-kyiv_nebo.md: 4/4 ballistic events and first to
+                         # name Kyiv on 27 Aug, so it may launch alone (>=0.6); 60% raid
+                         # coverage and bare-place style, so it may not wake the house
+                         # alone (<0.8)
+language: uk
+threads_by_reply: false  # 0 of 898 posts are replies -- a flat feed, no bumps
+
+# 88% of its posts carry no threat-type word at all. Without this the channel is inert:
+# `Нивки` is the whole message (channel-eval-kyiv_nebo.md §2.4).
+default_type: drone
+
+# It sleeps 06:00-10:00 Kyiv: hourly post counts across 13 days are 0/1/2/2 against 39
+# at 07:00 UTC. A gap in here is the operator asleep, not the agent blind (§6).
+quiet_hours: ["03:00-07:00"]

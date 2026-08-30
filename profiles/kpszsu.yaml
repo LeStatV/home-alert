@@ -1,0 +1,6 @@
+channel: kpszsu
+title: "Повітряні Сили ЗСУ"
+weight: 1.0              # the official anchor; on 22 Aug only it and war_monitor
+                         # reported the actual launch
+language: uk
+threads_by_reply: false  # 5% replies, and never to thread one target

@@ -1,0 +1,6 @@
+channel: war_monitor
+title: "War Monitor"
+weight: 0.9              # ARCHITECTURE #2; >=0.8, so a drone it puts over the house
+                         # wakes the household on its word alone
+language: uk
+threads_by_reply: true   # 14% of posts are replies, and it bumps its own launch calls
