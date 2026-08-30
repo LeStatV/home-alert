@@ -279,13 +279,24 @@ def test_28_aug_every_home_pass_of_the_worst_night_rings_the_phone():
     fifteen minutes after the ring last rang. A count jump is one of the four things
     SPEC story 7 allows to sound again, and the per-tier cooldown gates it like any
     other sound.
+
+    Four of these are the story-30 fallback (#9): reports naming the house or the ring
+    that nothing could type -- nebo_raketa's bare `Софіївська Борщагівака` at 00:37:07,
+    its `Виноградар` at 00:53:33 and `Святошинський район` at 03:21:34, and AerisRimor's
+    `Йде Виноградар на Антонов!` at 00:54:16. All four are WATCH: an untyped report
+    joins its zone's event weightless and can never wake the house by itself. The ring
+    WATCH that used to open at 00:55:22 now opens at 00:53:33 -- 1 m 49 s earlier, on
+    the same event -- and 00:55:22 is a body update on it.
     """
     assert audible("2026-08-28T00-30_08-00") == [
         ("00:35:53", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
-        ("00:55:22", "NEW", "WATCH", "БпЛА поруч"),
+        ("00:37:07", "NEW", "WATCH", "БпЛА поруч"),
+        ("00:53:33", "NEW", "WATCH", "БпЛА поруч"),
+        ("00:54:16", "NEW", "WATCH", "БпЛА над домом — одне джерело"),
         ("02:17:14", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
         ("02:45:44", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
         ("02:54:38", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("03:21:34", "NEW", "WATCH", "БпЛА поруч"),
         ("05:09:08", "NEW", "WATCH", "БпЛА поруч"),
         ("05:09:37", "NEW", "WATCH", "БпЛА над домом — одне джерело"),
         ("05:10:18", "PROMOTE", "URGENT", "БпЛА НАД ДОМОМ"),
@@ -719,3 +730,49 @@ def test_the_all_clear_follows_its_event_to_the_topic_it_woke_the_house_on():
         ("03:42:00", "INFO", "Відбій — БпЛА над домом", "urgent")]
     # and it is filed under the URGENT topic without ringing like one
     assert sent_payloads(clear[0])[0]["priority"] == 1
+
+
+def test_28_aug_an_unparsed_report_over_the_house_still_reaches_the_household():
+    """SPEC story 30, on the corpus's worst night. At 00:54:16 AerisRimor posts
+    `Йде Виноградар на Антонов!` -- a real drone over the home set, twenty minutes
+    into the raid, in wording no rule types: no drone word, no reply parent, and the
+    channel's 3-minute type memory has expired. Before this it produced nothing at all.
+
+    A rule gap must fail safe rather than silent, so it is a report at WATCH: the
+    household is told something is over the house from one source, and only a typed
+    report from a channel the owner trusts can raise that to the URGENT that wakes it.
+    """
+    assert ("00:54:16", "NEW", "WATCH", "БпЛА над домом — одне джерело") \
+        in audible("2026-08-28T00-30_08-00")
+
+
+def test_an_untyped_report_is_capped_at_watch_and_still_lets_two_sources_wake_the_house():
+    """SYNTHETIC fixture -- the corpus never puts an untyped report and two typed ones
+    close enough together to make either half of this visible. Wording is corpus
+    wording (AerisRimor's `Реактив <place>.`, kyiv_nebo's bare `Нивки`) with an untyped
+    call in war_monitor's voice.
+
+    war_monitor is w=0.9: a *typed* drone it puts over the house wakes the household on
+    its own. The same report in wording nothing can type is a WATCH and stays one -- the
+    story-30 fallback folds it in weightless, and that is the whole of the cap.
+
+    And it must not cost the household the wake-up it would have had: AerisRimor names
+    only a place the untyped report already named, which for two real sources is the
+    aggregator echo that counts half. A weightless report is not a source to be echoed,
+    so AerisRimor is whole (0.7), kyiv_nebo's `Нивки` twenty seconds later is the second
+    pair of eyes (0.6), and the noisy-OR reaches 0.88.
+    """
+    assert replay("synthetic-untyped-report-is-capped-at-watch") == [
+        ("02:00:00", "NEW", "WATCH", "БпЛА над домом — одне джерело"),
+        ("02:00:08", "UPDATE", "WATCH", "БпЛА над домом — одне джерело"),
+        ("02:00:20", "PROMOTE", "URGENT", "БпЛА НАД ДОМОМ"),
+    ]
+
+
+def test_the_untyped_fallback_never_fires_on_an_ad_an_essay_or_another_city():
+    """SYNTHETIC fixture. The fallback is for terse reports about our geometry that
+    nothing could type -- not for the three things that also carry no type: a
+    cross-promotion that happens to list the home set, a calm evening essay that
+    mentions it, and a terse report about somebody else's city (SPEC stories 22, 12).
+    """
+    assert replay("synthetic-untyped-report-negatives") == []

@@ -178,7 +178,11 @@ class Drone:
                 self.places.append(place)
         self.chained |= chained
         self.count = max(self.count, count)
-        self.echo = (message.time, set(named), message.channel)
+        if weight:
+            # a weightless story-30 report is not a fact worth halving a real second
+            # source against: it would turn the wake-up into a WATCH, which is the one
+            # thing a fail-safe path must never do
+            self.echo = (message.time, set(named), message.channel)
         self.last = message.time
 
 
@@ -489,7 +493,20 @@ class Pipeline:
         drone_report = (threat_type == "drone" and parse.places and parse.terse
                         and not parse.names_non_kyiv and not parse.is_clear
                         and not parse.is_recon)
-        zone = rules.zone(parse.places, self.home, self.nearby) if drone_report else None
+        # -- SPEC story 30, the rules-only failure mode: a terse report naming the house
+        # or the ring that nothing could type -- not the rules, not the reply chain, not
+        # the channel's memory, not the model. `Йде Виноградар на Антонов!` is a drone
+        # over the home set in wording no rule knows, and a rule gap must fail safe
+        # rather than silent. It is folded into the zone's drone event weightless, which
+        # is the whole of the cap: it can open a WATCH and lengthen the chain, and it can
+        # never on its own clear the noisy-OR bar that wakes the house.
+        untyped = (not drone_report and parse.places and parse.terse
+                   and not parse.names_non_kyiv
+                   and enrichment.unresolved(parse, threat_type))
+        zone = (rules.zone(parse.places, self.home, self.nearby)
+                if drone_report or untyped else None)
+        if untyped and zone not in ("HOME", "NEARBY"):
+            zone = None      # an untyped report about Kyiv at large is not a report
         if zone:
             self.tracked = {k: v for k, v in self.tracked.items()
                             if message.time - v[0] <= DRONE_WINDOW}
@@ -497,8 +514,9 @@ class Pipeline:
             # other zone and now puts it here. Replying to its own report of the same
             # zone is the same fact again and must not buy a channel its second source.
             parent = self.tracked.get((message.channel, message.reply_to))
-            chained = bool(parent) and parent[1] != zone
-            self.tracked[(message.channel, message.id)] = (message.time, zone)
+            chained = bool(parent) and parent[1] != zone and not untyped
+            if not untyped:      # an untyped report neither earns nor grants the chain
+                self.tracked[(message.channel, message.id)] = (message.time, zone)
 
             if zone != "KYIV":
                 self.last_near = message.time
@@ -507,7 +525,10 @@ class Pipeline:
             if fresh:
                 drone = self.drones[zone] = Drone(zone, message.time, message.time)
             was, counted = drone.tier, drone.count
-            drone.report(message, parse.places, profile.weight, chained, parse.count)
+            # a weightless report brings its places and nothing else: its count would
+            # be a second way to ring on a message nobody could type (story 7)
+            drone.report(message, parse.places, 0.0 if untyped else profile.weight,
+                         chained, 0 if untyped else parse.count)
 
             # a count jump is new information and may ring again (story 7); restating
             # the same figure is the same fact, and the cooldown below gates both
