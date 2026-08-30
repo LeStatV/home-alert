@@ -34,3 +34,45 @@ def test_27_aug_urgent_long_before_the_official_channel():
         ("00:26:22", "PROMOTE", "URGENT", "БАЛІСТИКА на Київ"),
         ("00:28:56", "RESOUND", "URGENT", "БАЛІСТИКА на Київ"),
     ]
+
+
+def test_target_less_launch_expires_without_ever_sounding_urgent():
+    """28 Aug 23:28-23:33: AerisRimor's `ЦІЛЬ` at 23:30:05 is followed only by
+    Mykolaiv-area places, so the WATCH expires after 90 s. It is never promoted
+    and never re-sounds."""
+    assert sounds("2026-08-28T23-28_23-33") == [
+        ("23:28:06", "NEW", "INFO", "Загроза балістики"),
+        ("23:30:05", "NEW", "WATCH", "Пуск балістики, ціль уточнюється"),
+    ]
+
+
+def test_nightly_summary_alone_produces_nothing():
+    """22 Aug 06:09-06:12: kpszsu's `ЗБИТО/ПОДАВЛЕНО 191 ЦІЛЬ ПРОТИВНИКА` digest
+    is a report of what already happened, not a launch."""
+    assert replay("2026-08-22T06-09_06-12") == []
+
+
+def test_22_aug_past_tense_and_promotion_post_never_sound():
+    """22 Aug 08:36-08:50: URGENT at 08:39:50. Afterwards AerisRimor's past-tense
+    `Цілі були або Іскандери…` and nebo_raketa's `@Kyiv` cross-promo push nothing."""
+    assert sounds("2026-08-22T08-36_08-50") == [
+        ("08:37:48", "NEW", "INFO", "Загроза балістики"),
+        ("08:39:49", "NEW", "WATCH", "Пуск балістики, ціль уточнюється"),
+        ("08:39:50", "PROMOTE", "URGENT", "БАЛІСТИКА на Київ"),
+        ("08:41:52", "RESOUND", "URGENT", "БАЛІСТИКА на Київ"),
+        ("08:44:14", "RESOUND", "URGENT", "БАЛІСТИКА на Київ"),
+    ]
+    assert [p for p in replay("2026-08-22T08-36_08-50") if p[0] == "08:47:46"] == []
+
+
+def test_19_aug_launches_on_other_cities_stay_below_the_notifier():
+    """19 Aug 20:52-20:58: URGENT at 20:52:25, and the launch calls naming Ромни,
+    Лубни, Миргород and Курщина push nothing while the Kyiv event is live."""
+    pushes = replay("2026-08-19T20-52_20-58")
+    assert [p for p in pushes if p[1] in ("NEW", "PROMOTE", "RESOUND")] == [
+        ("20:52:17", "NEW", "INFO", "Загроза балістики"),
+        ("20:52:25", "NEW", "URGENT", "БАЛІСТИКА на Київ"),
+        ("20:54:40", "RESOUND", "URGENT", "БАЛІСТИКА на Київ"),
+    ]
+    non_kyiv = {"20:55:45", "20:57:11", "20:57:12", "20:57:15", "20:57:21"}
+    assert [p for p in pushes if p[0] in non_kyiv] == []
