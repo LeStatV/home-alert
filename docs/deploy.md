@@ -77,3 +77,27 @@ The `system` topic should show `Агент запущено` within seconds of t
 `home-alert replay <from> <to> --db data/home-alert.db --from-db` re-runs the current
 rules over what the agent stored that night and prints what it would send now. Without
 `--from-db` the same command replays the research corpus and records into that file.
+
+## The nightly review
+
+`home-alert review` reads the night back out of the SQLite trail, lists what the rules
+could not type, and -- if `llm.provider` is set -- writes proposed profile changes to
+`profiles/reviews/<date>.diff`. It never edits a profile: the owner reads the file and
+applies the hunks they agree with. One line lands on the `system` topic per run
+(`4 unparsed across 1 channel, 1 proposal written`), so a night with nothing to say
+still says it.
+
+`profiles/` is baked into the image, not mounted, so the nightly run needs it bind-mounted
+or the review file goes away with the container. In the host's crontab:
+
+    17 5 * * *  cd /srv/home-alert && docker compose run --rm --no-deps \
+                  -v "$PWD/profiles:/app/profiles" agent \
+                  uv run --no-sync home-alert review --since 24h
+
+Then `git -C /srv/home-alert diff profiles/` after applying anything, and restart the
+agent: profiles are read once, at startup.
+
+`profiles/reviews/` is gitignored -- a proposal is scratch, and the applied change is
+the git record. Delete the file once you have applied what you want from it: a review
+of a night whose file is still sitting there refuses to run rather than overwrite
+proposals nobody has read.

@@ -3,6 +3,9 @@
 #   docker compose run --rm -it agent      # type phone + code once, session lands in data/
 #   docker compose up -d
 # Secrets come from ./.env (TG_API_ID, TG_API_HASH, NTFY_TOKEN) -- see docs/deploy.md.
+# Nightly profile review (cron on the host; `profiles/` is in the image, so mount it):
+#   docker compose run --rm --no-deps -v "$PWD/profiles:/app/profiles" agent \
+#     uv run --no-sync home-alert review --since 24h
 services:
   agent:
     build: .

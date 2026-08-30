@@ -1,6 +1,7 @@
 """`home-alert run` -- follow the live channels. `replay <from> <to>` -- what the
 household would have been sent. `add-channel @handle` -- draft a profile for a new
-channel and report what the rules make of its history."""
+channel and report what the rules make of its history. `review` -- what the rules
+could not type last night, and a proposed diff for the profiles."""
 import argparse
 import asyncio
 import contextlib
@@ -13,7 +14,7 @@ import yaml
 
 from telethon import TelegramClient
 
-from . import add_channel, events, notify, profiles, reader, store
+from . import add_channel, events, notify, profiles, reader, review, store
 
 
 def sink_for(config, ntfy):
@@ -105,11 +106,25 @@ def main(argv=None):
                                        "fetching from Telegram")
     new.add_argument("--limit", type=int, default=500,
                      help="how many of the channel's last messages to read")
+    look = commands.add_parser("review", help="propose profile changes for what the "
+                                              "rules could not type")
+    look.add_argument("--config", default="config.yaml")
+    look.add_argument("--db", help="override the configured sqlite file")
+    look.add_argument("--since", default="24h", type=review.since,
+                      help="how far back through the stored messages, e.g. 24h or 7d")
     args = parser.parse_args(argv)
 
     config = yaml.safe_load(Path(args.config).read_text(encoding="utf-8"))
     if args.command == "add-channel":
         add_channel.add(args.handle, config, args.history, args.limit)
+    elif args.command == "review":
+        # the summary line rides the same `system` topic the heartbeat does -- and an
+        # unconfigured ntfy costs the owner that line, never the report itself
+        ntfy = bool((config.get("ntfy") or {}).get("url"))
+        if not ntfy:
+            print("no ntfy server configured -- the summary line stays on this terminal.")
+        review.review(config, args.db or config["db"], args.since,
+                      sink_for(config, ntfy))
     else:
         (run if args.command == "run" else replay)(args, config)
     return 0

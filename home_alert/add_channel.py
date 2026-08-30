@@ -155,7 +155,7 @@ def report(handle, messages, profile, source):
 
 PROMPT = """\
 Channel: @{channel}
-The household is in Kyiv. HOME places: {home}. NEARBY places: {nearby}.
+{note}The household is in Kyiv. HOME places: {home}. NEARBY places: {nearby}.
 Vocabulary names you may extend, and no others: {vocab}
 Canonical place names, the only keys `place_aliases` may take: {places}
 
@@ -177,16 +177,25 @@ Answer with one JSON object with these keys:
                                    not asserting; every example is run through the
                                    rules and a wrong one is thrown away.
 
-The channel's last {shown} messages:
+{shown} messages from @{channel}:
 {messages}"""
 
 
-def draft_prompt(handle, messages, config):
+def draft_prompt(handle, messages, config, note=""):
     """What the model is shown: the household's geometry, the vocabulary it may
-    extend, the gazetteer it may not add to, and the channel's own messages."""
+    extend, the gazetteer it may not add to, and the channel's own messages.
+
+    `note` is what `review` adds -- the profile the channel already has, and the fact
+    that the messages below it are only the ones nothing could type. The rest of the
+    prompt is the same in both commands on purpose: it is the same answer shape, put
+    through the same validation, and a second copy of it would drift.
+    """
     shown = messages[-PROMPT_MESSAGES:]
+    # 200 characters each: `_item` in `review.py` dumps a proposed example on one
+    # line (`width=1000`), which is only safe because no message the model was shown
+    # -- and so no verbatim example -- is longer than this.
     return PROMPT.format(
-        channel=handle, home=", ".join(config.get("home") or ()),
+        channel=handle, note=note, home=", ".join(config.get("home") or ()),
         nearby=", ".join(config.get("nearby") or ()),
         vocab=", ".join(rules.VOCAB), places=", ".join(sorted(CANONICAL)),
         shown=len(shown),
@@ -260,8 +269,8 @@ def _examples(examples, note):
 
 
 def swallowed(patterns, messages, note):
-    """The accepted noise patterns, each with what it would silence out of this
-    history printed next to it -- a pattern nobody has run is a guess, and `.*` reads
+    r"""The accepted noise patterns, each with what it would silence out of this
+    history noted next to it -- a pattern nobody has run is a guess, and `.*` reads
     as `500/500` rather than as a plausible line of YAML.
 
     A pattern that cannot get through the history inside `NOISE_BUDGET` is dropped:
@@ -285,12 +294,15 @@ def swallowed(patterns, messages, note):
                 hits = None
                 break
         if hits is not None:
-            print(f"  noise {pattern!r}: silences {hits}/{len(messages)} of them")
+            # a note and not a `print`: `review` runs from cron at 05:17 with stdout
+            # going nowhere, and `noise '.': silences 47/47` is the one line standing
+            # between the owner and a silenced channel
+            note(f"noise {pattern!r}: silences {hits}/{len(messages)} of them")
             kept.append(pattern)
     return kept
 
 
-def _profile_of(draft):
+def profile_of(draft):
     """The draft as a real `Profile`, through the real loader -- with a weight, since
     the loader refuses a draft without one, which is the whole point of the draft."""
     with tempfile.TemporaryDirectory() as temporary:
@@ -348,7 +360,7 @@ def write_draft(handle, answer, messages, directory, note):
              "threads_by_reply": replies > len(messages) // 10,
              "default_type": None} | fields
     proposed = draft.pop("examples")
-    draft["examples"] = approved(_profile_of(draft | {"examples": []}), proposed, note)
+    draft["examples"] = approved(profile_of(draft | {"examples": []}), proposed, note)
     print(f"\nexamples: kept {len(draft['examples'])} of {len(proposed)} proposed"
           f" ({len(proposed) - len(draft['examples'])} dropped, the rules disagreed)")
     file = directory / "drafts" / f"{handle}.yaml"
@@ -385,7 +397,7 @@ def add(handle, config, history_path=None, limit=500):
         return None
     written = write_draft(handle, answer, messages, directory, notes.append)
     if notes:
-        print(f"\ndropped from the draft ({len(notes)}):")
+        print(f"\nnotes on the draft ({len(notes)}):")
         for line in notes:
             print(f"  {line}")
     if written:
