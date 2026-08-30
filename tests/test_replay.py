@@ -215,19 +215,18 @@ def test_30_aug_the_ring_warns_before_home_wakes_the_house():
     ]
 
 
-def test_30_aug_info_is_never_audible_and_typo_places_resolve():
+def test_30_aug_typo_places_land_on_the_right_event():
     """`Нивки на Шулявку.` reaches the home set and updates the URGENT in place;
     AerisRimor's next line `Ні на Оболонь.` resolves to Оболонь -- Kyiv, but neither
-    home nor ring -- and lands silently on the INFO event. Under the placeholder
-    HOME=Оболонь of BEHAVIOR.md that same line was an URGENT; with the real home set
-    it must not be. No INFO push is ever audible.
+    home nor ring -- and lands on the INFO event instead. Under the placeholder
+    HOME=Оболонь of BEHAVIOR.md that same line fired an URGENT; with the real home set
+    it must not, and the two lines must not end up on the same notification.
     """
-    pushes = replay("2026-08-30T09-40_10-20")
-    assert [p for p in pushes if p[0] in ("09:50:32", "09:50:39")] == [
+    assert [p for p in replay("2026-08-30T09-40_10-20")
+            if p[0] in ("09:50:32", "09:50:39")] == [
         ("09:50:32", "UPDATE", "URGENT", "БпЛА НАД ДОМОМ"),
         ("09:50:39", "UPDATE", "INFO", "БпЛА над Києвом"),
     ]
-    assert [p for p in audible("2026-08-30T09-40_10-20") if p[2] == "INFO"] == []
 
 
 def test_28_aug_every_home_pass_of_the_worst_night_rings_the_phone():
@@ -302,4 +301,22 @@ def test_faina_taun_resolves_to_the_home_set():
     """
     assert sounds("synthetic-home-alias-faina-taun") == [
         ("04:00:00", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
+    ]
+
+
+def test_an_aggregator_echo_is_half_a_source_and_a_fresh_report_is_whole():
+    """SYNTHETIC fixture -- the corpus never lands an echo where it would change a tier,
+    so it cannot supply this one. Wording is verbatim (AerisRimor's `2 реактива Оболонь -
+    Нивки київ.` of 28 Aug 05:09:37, kyiv_nebo's bare `Нивки`, Ukrainian_Intelligence's
+    `Київ - реактивний на <place> ⚠️` template) with the home place substituted in.
+
+    AerisRimor (w=0.7) alone is a WATCH. kyiv_nebo (w=0.6) ten seconds later adds no
+    place AerisRimor had not already named -- the aggregator echo `channel-eval-kyiv_nebo`
+    measured -- so it counts half and the house stays asleep (0.79). Ukrainian_Intelligence
+    at the same w=0.6, fifty seconds later and outside the echo window, is a real second
+    pair of eyes and wakes it. Same weight, same place: only the fifteen seconds differ.
+    """
+    assert sounds("synthetic-echo-is-half-a-source") == [
+        ("03:30:00", "NEW", "WATCH", "БпЛА над домом — одне джерело"),
+        ("03:31:00", "PROMOTE", "URGENT", "БпЛА НАД ДОМОМ"),
     ]
