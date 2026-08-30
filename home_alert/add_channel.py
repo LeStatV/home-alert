@@ -155,7 +155,7 @@ def report(handle, messages, profile, source):
 
 PROMPT = """\
 Channel: @{channel}
-The household is in Kyiv. HOME places: {home}. NEARBY places: {nearby}.
+{note}The household is in Kyiv. HOME places: {home}. NEARBY places: {nearby}.
 Vocabulary names you may extend, and no others: {vocab}
 Canonical place names, the only keys `place_aliases` may take: {places}
 
@@ -177,16 +177,22 @@ Answer with one JSON object with these keys:
                                    not asserting; every example is run through the
                                    rules and a wrong one is thrown away.
 
-The channel's last {shown} messages:
+{shown} messages from @{channel}:
 {messages}"""
 
 
-def draft_prompt(handle, messages, config):
+def draft_prompt(handle, messages, config, note=""):
     """What the model is shown: the household's geometry, the vocabulary it may
-    extend, the gazetteer it may not add to, and the channel's own messages."""
+    extend, the gazetteer it may not add to, and the channel's own messages.
+
+    `note` is what `review` adds -- the profile the channel already has, and the fact
+    that the messages below it are only the ones nothing could type. The rest of the
+    prompt is the same in both commands on purpose: it is the same answer shape, put
+    through the same validation, and a second copy of it would drift.
+    """
     shown = messages[-PROMPT_MESSAGES:]
     return PROMPT.format(
-        channel=handle, home=", ".join(config.get("home") or ()),
+        channel=handle, note=note, home=", ".join(config.get("home") or ()),
         nearby=", ".join(config.get("nearby") or ()),
         vocab=", ".join(rules.VOCAB), places=", ".join(sorted(CANONICAL)),
         shown=len(shown),
@@ -290,7 +296,7 @@ def swallowed(patterns, messages, note):
     return kept
 
 
-def _profile_of(draft):
+def profile_of(draft):
     """The draft as a real `Profile`, through the real loader -- with a weight, since
     the loader refuses a draft without one, which is the whole point of the draft."""
     with tempfile.TemporaryDirectory() as temporary:
@@ -348,7 +354,7 @@ def write_draft(handle, answer, messages, directory, note):
              "threads_by_reply": replies > len(messages) // 10,
              "default_type": None} | fields
     proposed = draft.pop("examples")
-    draft["examples"] = approved(_profile_of(draft | {"examples": []}), proposed, note)
+    draft["examples"] = approved(profile_of(draft | {"examples": []}), proposed, note)
     print(f"\nexamples: kept {len(draft['examples'])} of {len(proposed)} proposed"
           f" ({len(proposed) - len(draft['examples'])} dropped, the rules disagreed)")
     file = directory / "drafts" / f"{handle}.yaml"

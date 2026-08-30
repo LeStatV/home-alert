@@ -6,12 +6,17 @@ messages the rules could not type, and picking those out of a corpus night is a 
 The profile under review is a real one, comments and all -- the diff has to land in a
 file a human wrote, not in a file this project generated.
 """
+import hashlib
+import json
 import shutil
+import subprocess
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from harness import ROOT
-from home_alert import notify, profiles, review, rules, store
+from home_alert import llm, notify, profiles, review, rules, store
 from home_alert.reader import Message
+from test_profiles import seam_2
 
 CHANNEL = "war_monitor"          # a real profile with no `default_type`, so a message
                                  # with no threat word in it stays unparsed
@@ -67,3 +72,82 @@ def test_the_run_reports_what_the_rules_could_not_type_and_says_it_once(tmp_path
     push = sink.pushes[0]
     assert push.topic == notify.SYSTEM_TOPIC and push.tier == "INFO"
     assert push.body == "4 unparsed across 1 channel, 0 proposals written"
+
+
+# What a model answers, canned. Its own slang for a drone, the digest it wants
+# silenced, one alias -- and four things that may not reach the file: a noise pattern
+# the profile already carries, an example nobody in this window ever posted, an
+# example the rules disagree with, and a vocabulary name that does not exist.
+CANNED = json.dumps({
+    "noise_patterns": ["^ранковий дайджест", "^загальна оцінка загроз"],
+    "type_vocab": {"drone": ["пепелац", "мигал"], "aviation": ["тушк"]},
+    "place_aliases": {"Борщагівка": ["борщага"]},
+    "examples": [
+        {"text": "пепелаци над Святошином", "type": "drone", "stage": "trajectory",
+         "places": ["Святошин"]},
+        {"text": "Мигаль над Нивками", "type": "drone", "places": ["Нивки"]},
+        {"text": "Ранковий дайджест по країні", "noise": True},
+        {"text": "Шахеди над Києвом", "type": "drone"},
+        {"text": "два пепелаци курсом на Борщагівку", "type": "missile"},
+    ]}, ensure_ascii=False)
+
+
+class FakeLLM(llm.Client):
+    """A provider that answers `CANNED`, through the real client's own contract."""
+
+    def __init__(self, answer=CANNED):
+        self.answer, self.asked = answer, None
+
+    def complete(self, prompt, timeout, system=None):
+        self.asked = prompt
+        return self.answer
+
+
+def run(tmp_path, monkeypatch, answer=CANNED, texts=None, db=None):
+    """A review run against a canned provider; returns the review file it wrote."""
+    fake = FakeLLM(answer)
+    monkeypatch.setattr(llm, "client", lambda config: fake)
+    review.review(config(tmp_path, "openai"), db or seed(tmp_path, texts),
+                  sink=notify.Recorder())
+    return tmp_path / "profiles" / "reviews" / f"{NOW:%Y-%m-%d}.diff"
+
+
+def digest(directory):
+    """Every profile on disk, byte for byte."""
+    return {file.name: hashlib.sha256(file.read_bytes()).hexdigest()
+            for file in sorted(Path(directory).glob("*.yaml"))}
+
+
+def test_the_diff_applies_to_the_real_profile_and_its_examples_pass_seam_2(
+        tmp_path, monkeypatch):
+    """AC1 and AC2, mechanically. The diff is applied with `patch`, the patched file
+    is loaded through the real loader, and every example in it -- the ones that were
+    already there and the ones the review proposed -- is run through seam 2. Nothing
+    is edited by hand in between: that is what "without further edits" means."""
+    file = run(tmp_path, monkeypatch)
+    assert file.exists()
+
+    applied = subprocess.run(["patch", "-p0", "-d", str(tmp_path), "--dry-run"],
+                             stdin=file.open(), capture_output=True, text=True)
+    assert applied.returncode == 0, applied.stdout + applied.stderr
+    subprocess.run(["patch", "-p0", "-d", str(tmp_path)], stdin=file.open(),
+                   check=True, capture_output=True)
+
+    profile = profiles.load(tmp_path / "profiles")[CHANNEL]
+    texts = [example["text"] for example in profile.examples]
+    assert "пепелаци над Святошином" in texts
+    assert "☄ Вихід у напрямку Києва" in texts        # the profile's own, still there
+    for example in profile.examples:
+        got = seam_2(profile, example)
+        listed = set(example) - {"text"}
+        assert listed and {field: got[field] for field in listed} == {
+            field: example[field] for field in listed}, example
+
+
+def test_the_profiles_on_disk_are_the_same_bytes_after_a_run(tmp_path, monkeypatch):
+    """AC3, and the whole point of the story: a review proposes, it never applies."""
+    before = digest(tmp_path / "profiles") if (tmp_path / "profiles").exists() else None
+    fake_config = config(tmp_path)          # copies the real profile into place
+    before = digest(fake_config["profiles"])
+    run(tmp_path, monkeypatch)
+    assert digest(fake_config["profiles"]) == before
