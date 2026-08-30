@@ -4,11 +4,14 @@ The Telethon half is the owner's to verify -- there are no credentials here -- s
 every test feeds the same thing a fetch produces: a JSONL history file. The research
 corpus *is* fetched history, which is what makes AC1 machine-verifiable.
 """
+import json
+
 import pytest
 import yaml
 
 from harness import ROOT
-from home_alert import add_channel, llm, profiles, rules
+from home_alert import add_channel, llm, profiles
+from test_profiles import seam_2
 
 HISTORY = ROOT / "research" / "samples-2026-08-30" / "kyiv_nebo.jsonl"
 
@@ -105,10 +108,7 @@ def test_every_example_in_the_draft_passes_seam_2(tmp_path, monkeypatch, capsys)
 
     assert profile.examples
     for example in profile.examples:
-        parse = rules.classify(example["text"], profile)
-        got = {"type": rules.type_of(parse, profile.default_type),
-               "stage": rules.stage(parse), "places": list(parse.places),
-               "count": parse.count, "noise": parse.is_noise}
+        got = seam_2(profile, example)     # the profiles' own check, not the drafter's
         listed = set(example) - {"text"}
         assert listed and listed <= set(got)
         assert {field: got[field] for field in listed} == {field: example[field]
@@ -177,3 +177,49 @@ def test_a_provider_that_says_nothing_useful_costs_the_draft_only(tmp_path, monk
     out = capsys.readouterr().out
     assert not file.exists()
     assert "unparsed" in out and "drafting skipped" in out
+
+
+def test_a_corpus_directory_is_not_one_channels_history(tmp_path):
+    """`config.yaml: corpus` names a directory of six channels, and it is the obvious
+    thing to paste after `--history`. Six channels under one channel's name make a
+    report that reads as right and is not: the other five decide this one's
+    `threads_by_reply`, and their typed messages bury its unparsed ones."""
+    with pytest.raises(AssertionError, match="one channel's history file"):
+        add_channel.add("@kyiv_nebo", config(tmp_path), history_path=HISTORY.parent)
+
+
+def test_a_noise_pattern_is_run_over_the_history_before_it_is_written(tmp_path,
+                                                                      monkeypatch,
+                                                                      capsys):
+    """A noise pattern silences the channel for good, and one nobody has run is a
+    guess: each is printed with what it would swallow out of this very history, so
+    `.*` reads as `500/500` instead of as a plausible line of YAML."""
+    answer = json.dumps({"noise_patterns": [".*", "^Нивки$"], "examples": []})
+    file = draft(tmp_path, monkeypatch, answer=answer)
+    out = capsys.readouterr().out
+    assert yaml.safe_load(file.read_text(encoding="utf-8"))["noise_patterns"] == [
+        ".*", "^Нивки$"]
+    assert "silences 500/500" in out
+
+
+def test_a_noise_pattern_too_slow_to_run_is_dropped(tmp_path, monkeypatch, capsys):
+    r"""`^(\w+\s?)+$` compiles fine and takes 40 s on one of this channel's messages;
+    the live path would run it on every post. The budget is what catches it -- the
+    test moves the budget rather than spending the 40 s."""
+    monkeypatch.setattr(add_channel, "NOISE_BUDGET", 0)
+    answer = json.dumps({"noise_patterns": ["^Нивки$"], "examples": []})
+    file = draft(tmp_path, monkeypatch, answer=answer)
+    out = capsys.readouterr().out
+    assert yaml.safe_load(file.read_text(encoding="utf-8"))["noise_patterns"] == []
+    assert "too slow" in out
+
+
+def test_an_example_that_is_not_an_object_does_not_cost_the_draft(tmp_path, monkeypatch,
+                                                                  capsys):
+    """Models answer with a list of strings where a list of objects was asked for."""
+    answer = json.dumps({"examples": ["Нивки",
+                                      {"text": "4 Циркони", "type": "missile"}]})
+    file = draft(tmp_path, monkeypatch, answer=answer)
+    assert [e["text"] for e in yaml.safe_load(file.read_text(encoding="utf-8"))
+            ["examples"]] == ["4 Циркони"]
+    assert "not an object" in capsys.readouterr().out

@@ -13,6 +13,7 @@ import json
 import os
 import re
 import tempfile
+import time
 from collections import Counter
 from pathlib import Path
 
@@ -23,6 +24,7 @@ from .context import Context
 
 UNPARSED_SHOWN = 50      # the rest is a count: an unparsed list can be 400 lines long
 PROMPT_MESSAGES = 400    # how many of the fetched messages the model is shown
+NOISE_BUDGET = 1.0       # seconds one noise pattern may spend on the whole history
 EXAMPLE_FIELDS = {"type", "stage", "places", "count", "noise"}
 CANONICAL = frozenset(rules.PLACES.values())   # the only names a place_alias may map to
 
@@ -49,10 +51,23 @@ def history(handle, config, path=None, limit=500):
     that, which is how this command is verified without credentials. Without it the
     messages come from Telegram through the same session and the same `normalize` the
     live agent uses, so a fetched message and a live one are the same `Message`.
+
+    One channel's history, or nothing: `read_corpus` also reads a whole corpus
+    *directory*, which is what `config.yaml: corpus` names and so exactly what gets
+    pasted in here -- and six channels' messages under one channel's name make a
+    report that looks right and is not (six channels' replies decide this one's
+    `threads_by_reply`, five channels' typed messages hide its unparsed ones).
     """
-    if path:
-        return reader.read_corpus(path)[-limit:]
-    return asyncio.run(_fetch(handle, config, limit))
+    if not path:
+        return asyncio.run(_fetch(handle, config, limit))
+    messages = reader.read_corpus(path)
+    # not `m.channel == handle`: `read_corpus` names a message after its file, so a
+    # renamed single-channel dump would filter down to nothing and report on silence.
+    found = sorted({message.channel for message in messages})
+    assert len(found) <= 1, (
+        f"{path} holds {len(found)} channels ({', '.join(found)}) -- --history takes "
+        "one channel's history file, not a corpus directory")
+    return messages[-limit:]
 
 
 async def _fetch(handle, config, limit):
@@ -121,8 +136,9 @@ def report(handle, messages, profile, source):
           f" (threads_by_reply: {str(replies > total // 10).lower()})")
     labels, unparsed, noise = coverage(messages, profile)
     classified = sum(labels.values())
-    print("\ncoverage" + (f" (with profiles/{handle}.yaml)" if profile
-                          else " (no profile yet -- the global rules only)"))
+    print("\ncoverage" + (f" (with profiles/{handle}.yaml" if profile
+                          else " (no profile yet -- the global rules only")
+          + ", in 3-min channel context)")
     print(f"  classified      {classified:5d} {_percent(classified, total)}   "
           + " * ".join(f"{name} {count}" for name, count in labels.most_common()))
     print(f"  unparsed        {len(unparsed):5d} {_percent(len(unparsed), total)}")
@@ -230,6 +246,9 @@ def _examples(examples, note):
     nothing at all is no example."""
     kept = []
     for example in examples if isinstance(examples, list) else ():
+        if not isinstance(example, dict):
+            note(f"example {str(example)[:40]!r}: not an object")
+            continue
         text = " ".join(str(example.get("text") or "").split())
         listed = {field: value for field, value in example.items()
                   if field != "text" and value is not None}
@@ -237,6 +256,37 @@ def _examples(examples, note):
             note(f"example {text[:40]!r}: no such field(s) {sorted(unknown)}")
         elif text and listed:
             kept.append({"text": text} | listed)
+    return kept
+
+
+def swallowed(patterns, messages, note):
+    """The accepted noise patterns, each with what it would silence out of this
+    history printed next to it -- a pattern nobody has run is a guess, and `.*` reads
+    as `500/500` rather than as a plausible line of YAML.
+
+    A pattern that cannot get through the history inside `NOISE_BUDGET` is dropped:
+    `^(\w+\s?)+$` compiles fine, backtracks for 40 s on one of kyiv_nebo's messages,
+    and the live path would run it on every post the channel ever makes.
+
+    ponytail: the budget is checked between messages, so it bounds the whole scan at
+    one message's worst case, not at a second -- a single catastrophic match still
+    runs to completion, because `re` cannot be interrupted. Bounding one match needs
+    the scan in another process, which is a lot of machinery for an offline command
+    that is already showing the owner the number.
+    """
+    kept = []
+    for pattern in patterns:
+        compiled, started, hits = re.compile(pattern, re.I), time.monotonic(), 0
+        for message in messages:
+            hits += bool(compiled.search(message.text))
+            if time.monotonic() - started > NOISE_BUDGET:
+                note(f"noise {pattern!r}: more than {NOISE_BUDGET:g}s over this "
+                     "history -- too slow to run on every post the channel makes")
+                hits = None
+                break
+        if hits is not None:
+            print(f"  noise {pattern!r}: silences {hits}/{len(messages)} of them")
+            kept.append(pattern)
     return kept
 
 
@@ -290,6 +340,8 @@ def write_draft(handle, answer, messages, directory, note):
         print("\nthe provider did not answer with usable JSON -- profile drafting "
               "skipped.")
         return None
+    print(f"\nnoise patterns, over the same {len(messages)} messages:")
+    fields["noise_patterns"] = swallowed(fields["noise_patterns"], messages, note)
     replies = sum(1 for message in messages if message.reply_to)
     draft = {"channel": handle, "weight": None, "language": "uk",
              # derived, not asked: the history says this outright
@@ -316,6 +368,9 @@ def add(handle, config, history_path=None, limit=500):
     existing = profiles.load(directory)[handle] if file.exists() else None
     messages = history(handle, config, history_path, limit)
     report(handle, messages, existing, history_path or "Telegram")
+    if not messages:
+        print("\nno messages -- nothing to draft from.")
+        return None
 
     client = llm.client(config.get("llm"))
     if client is None:
