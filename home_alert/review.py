@@ -196,11 +196,14 @@ def merge(text, current, additions):
 # -- what the model may propose ----------------------------------------------------
 
 def _new(proposed, existing, note, what):
-    """The patterns this profile does not already carry."""
-    kept = [p for p in proposed if p not in (existing or ())]
+    """The patterns this profile does not already carry. A proposal that repeats the
+    file back at us is not a change, and a diff that contains one is noise."""
+    kept = []
     for pattern in proposed:
         if pattern in (existing or ()):
             note(f"{what} {pattern!r}: the profile already has it")
+        else:
+            kept.append(pattern)
     return kept
 
 
@@ -239,7 +242,8 @@ def additions(fields, current, missed, messages, note):
 
 
 def propose(channel, path, group, config, client, note):
-    """One channel's proposed diff, or None when there is nothing to propose.
+    """`(diff, examples kept, examples proposed)` for one channel -- diff None when
+    there is nothing left to propose.
 
     The examples go through `add-channel`'s own seam-2 gate, against this profile
     *with the rest of the proposal applied* -- so a new vocabulary word is what makes
@@ -247,10 +251,11 @@ def propose(channel, path, group, config, client, note):
     here rather than breaking `tests/test_profiles.py` after the owner applies it.
     """
     messages, missed = group
-    current = yaml.safe_load(path.read_text(encoding="utf-8"))
+    text = path.read_text(encoding="utf-8")
+    current = yaml.safe_load(text)
     answer = client.draft(add_channel.draft_prompt(
         channel, [message for message, _ in missed], config,
-        note=NOTE.format(current=path.read_text(encoding="utf-8"))))
+        note=NOTE.format(current=text)))
     if answer is None:
         note("the provider did not answer")
         return None, 0, 0
@@ -270,7 +275,6 @@ def propose(channel, path, group, config, client, note):
         add_channel.profile_of(_merged(current, new, channel)), proposed, note)
     if not any(new.values()):
         return None, 0, len(proposed)
-    text = path.read_text(encoding="utf-8")
     name = f"{Path(config['profiles']).name}/{path.name}"
     return ("".join(difflib.unified_diff(text.splitlines(keepends=True),
                                          merge(text, current, new).splitlines(True),
@@ -278,16 +282,16 @@ def propose(channel, path, group, config, client, note):
             len(new["examples"]), len(proposed))
 
 
-def _merged(current, additions, channel):
+def _merged(current, new, channel):
     """This profile as it would be with the proposal applied -- what the examples are
     checked against, so a new vocabulary word is what makes its own example pass."""
     merged = dict(current) | {"channel": channel, "examples": []}
     merged["noise_patterns"] = list(current.get("noise_patterns") or ()) + \
-        additions["noise_patterns"]
+        new["noise_patterns"]
     for key in ("type_vocab", "place_aliases"):
         merged[key] = (current.get(key) or {}) | {
             name: list((current.get(key) or {}).get(name) or ()) + patterns
-            for name, patterns in additions[key].items()}
+            for name, patterns in new[key].items()}
     return merged
 
 
