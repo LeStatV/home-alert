@@ -65,8 +65,10 @@ class Console:
     """CLI sink: the notification sequence `replay` prints."""
 
     def __call__(self, push):
+        # the body is several lines on a phone; on a terminal it stays one, so a replay
+        # of a whole night can be diffed against another one line for line
         print(f"{push.time:%Y-%m-%d %H:%M:%S}  {push.kind:<8} {push.tier:<6} "
-              f"{push.title}  |  {push.body}")
+              f"{push.title}  |  {' · '.join(push.body.splitlines())}")
 
 
 class Ntfy:

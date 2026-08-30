@@ -592,10 +592,13 @@ def test_the_all_clear_is_one_silent_info_after_ten_quiet_minutes_and_a_clear_ca
     household gets one silent INFO telling it to come out of the corridor (story 8),
     and only one -- the next message does not repeat it.
     """
-    assert replay("synthetic-all-clear-after-quiet") == [
+    pushes = bodies("synthetic-all-clear-after-quiet")
+    assert [p[:4] for p in pushes] == [
         ("02:00:00", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
         ("02:12:00", "CLEAR", "INFO", "Відбій — БпЛА над домом"),
     ]
+    # and the age of that last report is the point of it: twelve minutes of nothing
+    assert "звіт 02:00:00 (12 хв тому)" in pushes[1][4], pushes[1][4]
 
 
 def test_quiet_alone_is_never_an_all_clear():

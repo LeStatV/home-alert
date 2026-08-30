@@ -274,10 +274,11 @@ class Pipeline:
                 or when - self.started < SILENT_WARN):
             return []
         self.warned = True
+        # not `self.tail`: the N/6 label counts a wider window than this warning does,
+        # and printing both here only invites the owner to reconcile two numbers
         push = Push(when, "SYSTEM", "INFO", SILENT_TITLE,
-                    f"мовчать: {', '.join(quiet)}\n"
-                    f"{SIREN_LABEL[self.siren]} · {self.active(when)}/"
-                    f"{len(self.channels)} каналів активні",
+                    f"{SIREN_LABEL[self.siren]}, а мовчать понад "
+                    f"{int(SILENT_WARN.total_seconds() // 60)} хв: {', '.join(quiet)}",
                     f"silent-{when:%Y%m%dT%H%M%S}", topic=SYSTEM_TOPIC)
         self.sink(push)
         return [push]
