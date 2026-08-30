@@ -12,6 +12,12 @@ home: [Нивки, Антонов]
 nearby: [Святошин, Борщагівка, Шулявка, Сирець, Берковець, Виноградар, Біличі,
          Академмістечко, Коцюбинське, Гостомель, Відрадний, Рембаза, Пуща-Водиця]
 
+# Live run. Secrets stay in the environment: TG_API_ID, TG_API_HASH (the phone and
+# code are typed once, at first start) and NTFY_TOKEN.
+telegram:
+  session: data/home-alert     # Telethon appends `.session`; protected volume, ADR note
+db: data/home-alert.db         # `replay` uses --db, defaulting to :memory:
+
 drone:
   cooldown_min:      # per tier; gates sounds only, body updates stay unlimited.
                      # Kept per (zone, tier) rather than per tier alone -- a documented
