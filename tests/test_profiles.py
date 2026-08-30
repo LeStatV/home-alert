@@ -74,6 +74,7 @@ BAD = {
     "no profiles at all": {},                                   # wrong cwd, empty dir
     "war_monitor.yaml": "channel: war_monitor\nweight: 8\n",    # the missed decimal point
     "kyiv_nebo.yaml": "weight: 0.6\ndefault_type: drones\n",    # a type nothing routes on
+    "newcomer.yaml": "channel: newcomer\nweight: null\n",       # an approved draft
 }
 
 
@@ -86,3 +87,15 @@ def test_a_profile_that_would_break_the_alert_path_never_loads(tmp_path, name, t
         (tmp_path / name).write_text(text, encoding="utf-8")
     with pytest.raises(AssertionError):
         profiles.load(tmp_path)
+
+
+def test_a_draft_whose_weight_is_still_unset_is_refused_by_name(tmp_path):
+    """`add-channel` writes `weight: null`; nothing goes live until the owner sets it.
+    The refusal has to name the file and say what to do -- the alternative is a
+    `TypeError: float() argument must be...` at the live agent's startup."""
+    (tmp_path / "newcomer.yaml").write_text("channel: newcomer\nweight: null\n",
+                                            encoding="utf-8")
+    with pytest.raises(AssertionError) as refused:
+        profiles.load(tmp_path)
+    assert "newcomer.yaml" in str(refused.value)
+    assert "set the weight" in str(refused.value)

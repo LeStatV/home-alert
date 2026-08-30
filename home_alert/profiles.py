@@ -61,6 +61,11 @@ def load(directory):
     for file in sorted(Path(directory).glob("*.yaml")):
         raw = yaml.safe_load(file.read_text(encoding="utf-8"))
         assert isinstance(raw, dict) and "weight" in raw, f"{file.name}: no weight"
+        # `add-channel` writes drafts with `weight: null`. A draft moved in here before
+        # the owner has read it must stop the agent by name, not with a TypeError.
+        assert raw["weight"] is not None, (
+            f"{file}: weight is not set -- read the draft and set the weight "
+            "(0.0-1.0) before this channel goes live")
         weight = float(raw["weight"])
         assert 0.0 <= weight <= 1.0, f"{file.name}: weight {weight} outside 0..1"
         assert raw.get("default_type") in (None, *TYPES), (
