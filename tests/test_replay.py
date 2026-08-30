@@ -24,9 +24,11 @@ def test_27_aug_urgent_long_before_the_official_channel():
 
     Three of the old resounds were bumps -- war_monitor and Ukrainian_Intelligence
     re-posting their own launch as a reply (00:02:41, 00:04:58, 00:28:56). A bump is
-    a no-op, so the second sound is now AerisRimor's own next launch call at 00:02:47,
-    and the event closes 5 min after the last real launch -- early enough that the
-    00:09:50 threat declaration is no longer swallowed by a live event.
+    a no-op, so the second sound is now AerisRimor's own next launch call at 00:02:47.
+
+    The 00:09:50 threat INFO is an edge of the slice, not a result worth reading into:
+    the fixture starts at 00:00, so no earlier declaration is in scope to open the
+    15-min threat window that would otherwise dedup it.
     """
     assert sounds("2026-08-27T00-00_00-30") == [
         ("00:00:18", "NEW", "WATCH", "Пуск балістики, ціль уточнюється"),
@@ -96,6 +98,9 @@ def test_19_aug_ballistic_wave_is_eight_sounds_in_twenty_six_minutes():
         ("21:09:38", "RESOUND", "URGENT", "БАЛІСТИКА на Київ"),
         ("21:11:45", "RESOUND", "URGENT", "БАЛІСТИКА на Київ"),
     ]
+    assert [p for p in replay("2026-08-19T20-50_21-16")
+            if p[3] == "Загроза балістики"] == [
+        ("20:52:17", "NEW", "INFO", "Загроза балістики")]
 
 
 def test_19_aug_launches_on_other_cities_stay_below_the_notifier():
@@ -163,21 +168,19 @@ def test_19_aug_modifier_apostrophe_target_call_is_a_launch():
     ]
 
 
-def test_a_bare_place_takes_the_type_its_channel_is_already_talking_about():
+def test_a_kyiv_place_promotes_a_pending_launch_whatever_the_channel_said_before():
     """SYNTHETIC fixture -- the corpus never puts a drone report and a target-less
-    ballistic WATCH close enough together to tell the two readings apart. Wording is
+    ballistic WATCH close enough together to make the choice visible. Wording is
     verbatim from the corpus (AerisRimor's `Реактив сектор Білогородка - Бузова.` and
-    `Чайки, Білогородка.`, Ukrainian_Intelligence's `‼️ Вихід балістики з Брянська`
-    and `Троя`).
+    `Київ увага!`, Ukrainian_Intelligence's `‼️ Вихід балістики з Брянська`).
 
-    Twice a target-less launch opens a WATCH and a bare place name follows. The first
-    time the place is a reply to the channel's drone post (3 min 50 s earlier, so only
-    the reply chain can carry the type); the second time it is a plain post 2 min 20 s
-    after one. Both are drones, so neither promotes. `Троя`, 40 s after the same
-    channel's own launch call, is ballistic and does promote.
+    A target-less launch opens a WATCH 2 min after the channel's last drone post, and a
+    bare `Київ увага!` follows 20 s later. SPEC promotes on "the next Kyiv place from
+    ANY channel" with no type qualifier, so it promotes: only a drone word in the
+    message's own text may veto, never an inherited or remembered type. Getting this
+    wrong leaves the WATCH to expire and the household asleep.
     """
-    assert replay("synthetic-inherited-type") == [
-        ("01:03:30", "NEW", "WATCH", "Пуск балістики, ціль уточнюється"),
-        ("01:12:00", "NEW", "WATCH", "Пуск балістики, ціль уточнюється"),
-        ("01:12:40", "PROMOTE", "URGENT", "БАЛІСТИКА на Київ"),
+    assert replay("synthetic-drone-context-still-promotes") == [
+        ("01:02:00", "NEW", "WATCH", "Пуск балістики, ціль уточнюється"),
+        ("01:02:20", "PROMOTE", "URGENT", "БАЛІСТИКА на Київ"),
     ]

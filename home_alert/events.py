@@ -56,7 +56,6 @@ def replay(messages, config, sink, store=None):
     for message in messages:
         text = " ".join(message.text.split())
         parse = rules.classify(text)
-        in_context = context.assemble(message, text, parse)
         pushes = []
 
         def emit(kind, tier, title):
@@ -70,8 +69,13 @@ def replay(messages, config, sink, store=None):
             if store:
                 store.record(message, parse, event, pushes)
 
-        # a bump -- the same text re-posted as a reply -- is the same fact twice
-        if not text or parse.is_noise or in_context is None:
+        if not text or parse.is_noise:
+            done()
+            continue
+
+        # spec order is noise -> context -> rules: an ad must not set the channel's type
+        in_context = context.assemble(message, text, parse)
+        if in_context is None:      # a bump: the same text re-posted as a reply
             done()
             continue
         parse = in_context

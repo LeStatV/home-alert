@@ -6,7 +6,6 @@ re-posted as a reply to push it back up the feed. Two memories per channel turn
 that back into whole messages: the reply chain, and the type the channel is
 currently talking about.
 """
-from dataclasses import replace
 from datetime import timedelta
 
 # ponytail: the spec names two windows -- a 45 s burst and a ~3 min current-type
@@ -18,7 +17,11 @@ MEMORY = timedelta(minutes=3)
 
 
 def kind(parse):
-    """The threat type a message states in its own words, or None if it states none."""
+    """The threat type a message states in its own words, or None if it states none.
+
+    A message carrying both (`🅿️ Одеса 4х мгКР Бандероль над містом.`) reads as a
+    drone; when #5 gives cruise missiles their own tier this needs a real precedence.
+    """
     if parse.is_drone:
         return "drone"
     if parse.names_ballistic or parse.is_launch or parse.is_threat:
@@ -27,42 +30,38 @@ def kind(parse):
 
 
 class Context:
-    """Per-channel memory. One instance per run, fed every message in time order."""
+    """Per-channel memory. One instance per run, fed every non-noise message in order."""
 
     def __init__(self):
-        self.texts = {}      # (channel, id) -> text, so a repost can be recognised
-        self.kinds = {}      # (channel, id) -> resolved type, for the reply chain
+        self.seen = {}       # (channel, id) -> (time, text, resolved type), pruned
         self.current = {}    # channel -> (time, type) of its last message that said one
 
     def assemble(self, message, text, parse):
         """The parse in context, or None when the message is a bump (nothing new).
 
-        A message that names no type takes one from its reply parent, else from what
-        its channel was talking about up to `MEMORY` ago. Only the type is inherited:
-        places, launch wording and the non-Kyiv flag are always the message's own.
+        A bump is the same text re-posted as a reply -- the same fact twice. Types are
+        resolved (reply parent first, else what the channel was talking about up to
+        `MEMORY` ago) and remembered, but nothing reads them yet: the drone events of #4
+        are their first consumer, and the chain has to be built from the first message
+        to be right by then.
+
+        ponytail: a bump whose parent fell out of the window -- older than `MEMORY`,
+        or posted before this replay/process started -- is not recognised as one. That
+        is the same 3 minutes after which a re-post is a fresh report anyway.
         """
-        key = (message.channel, message.id)
-        parent = (message.channel, message.reply_to)
-        bump = self.texts.get(parent) == text
-        self.texts[key] = text
+        self.seen = {k: v for k, v in self.seen.items()
+                     if message.time - v[0] <= MEMORY}
+        parent = self.seen.get((message.channel, message.reply_to))
 
-        own = kind(parse)
-        if own is not None:
-            self.current[message.channel] = (message.time, own)
-            self.kinds[key] = own
-            return None if bump else parse
-
-        inherited = self.kinds.get(parent)
-        if inherited is None:
+        resolved = kind(parse)
+        if resolved is not None:
+            self.current[message.channel] = (message.time, resolved)
+        else:
+            resolved = parent[2] if parent else None
+        if resolved is None:
             remembered = self.current.get(message.channel)
             if remembered and message.time - remembered[0] <= MEMORY:
-                inherited = remembered[1]
-        self.kinds[key] = inherited
+                resolved = remembered[1]
 
-        if bump:
-            return None
-        if inherited == "drone":
-            return replace(parse, is_drone=True)
-        if inherited == "ballistic":
-            return replace(parse, names_ballistic=True)
-        return parse
+        self.seen[(message.channel, message.id)] = (message.time, text, resolved)
+        return None if parent and parent[1] == text else parse
