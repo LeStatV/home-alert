@@ -1,3 +1,9 @@
+import json
+from datetime import datetime
+from unittest import mock
+
+from home_alert import notify
+from home_alert.notify import Push
 from harness import audible, replay, sounds
 
 
@@ -29,12 +35,16 @@ def test_27_aug_urgent_long_before_the_official_channel():
     The 00:09:50 threat INFO is an edge of the slice, not a result worth reading into:
     the fixture starts at 00:00, so no earlier declaration is in scope to open the
     15-min threat window that would otherwise dedup it.
+
+    The 00:16:49 INFO is war_monitor's `1х реактивний БпЛА над київським водосховищем`:
+    a drone somewhere in the oblast, its own event, priority 2 and silent.
     """
     assert sounds("2026-08-27T00-00_00-30") == [
         ("00:00:18", "NEW", "WATCH", "Пуск балістики, ціль уточнюється"),
         ("00:00:39", "PROMOTE", "URGENT", "БАЛІСТИКА на Київ"),
         ("00:02:47", "RESOUND", "URGENT", "БАЛІСТИКА на Київ"),
         ("00:09:50", "NEW", "INFO", "Загроза балістики"),
+        ("00:16:49", "NEW", "INFO", "БпЛА над Києвом"),
         ("00:24:54", "NEW", "WATCH", "Пуск балістики, ціль уточнюється"),
         ("00:26:22", "PROMOTE", "URGENT", "БАЛІСТИКА на Київ"),
     ]
@@ -148,8 +158,10 @@ def test_29_aug_onyx_on_odesa_never_becomes_a_kyiv_alert():
     """29 Aug 02:33-02:40: an Onyx over the Azov-Black Sea approaches Odesa. The
     declared Crimea threat is a real INFO; nothing else may sound. `Ціль через АЧМ`,
     `Київ/Київщина — дорозвідка` and Odesa's `Київський район/Аркадія` must not
-    combine into a Kyiv ballistic event."""
+    combine into a Kyiv ballistic event. nebo_raketa's `Вишневе` is a real drone in the
+    oblast and opens its own silent INFO -- a separate event key, no sound."""
     assert replay("2026-08-29T02-33_02-40") == [
+        ("02:35:16", "NEW", "INFO", "БпЛА над Києвом"),
         ("02:35:23", "NEW", "INFO", "Загроза балістики"),
     ]
 
@@ -179,8 +191,164 @@ def test_a_kyiv_place_promotes_a_pending_launch_whatever_the_channel_said_before
     ANY channel" with no type qualifier, so it promotes: only a drone word in the
     message's own text may veto, never an inherited or remembered type. Getting this
     wrong leaves the WATCH to expire and the household asleep.
+
+    The opening drone report is its own silent INFO event (Білогородка is oblast, not the
+    ring): drone and ballistic events share the message stream and nothing else.
     """
     assert replay("synthetic-drone-context-still-promotes") == [
+        ("01:00:00", "NEW", "INFO", "БпЛА над Києвом"),
         ("01:02:00", "NEW", "WATCH", "Пуск балістики, ціль уточнюється"),
         ("01:02:20", "PROMOTE", "URGENT", "БАЛІСТИКА на Київ"),
+    ]
+
+
+def test_30_aug_the_ring_warns_before_home_wakes_the_house():
+    """30 Aug 09:40-10:20, the nightly jet-drone loop Оболонь -> Нивки -> Вишневе.
+
+    The ring warns first: AerisRimor puts the drone over Шулявка at 09:45:05, a minute
+    before kyiv_nebo's bare `Нивки, Святошин` reaches the home set. kyiv_nebo alone is
+    w=0.6 -- not enough to wake the house -- so that is a WATCH; AerisRimor's
+    `Підвернув на анонов!` four seconds later is a second, independent pair of eyes
+    (it names Антонов, which kyiv_nebo did not, so it is no echo) and the noisy-OR
+    clears 0.8. One URGENT for a drone that circles overhead for the next 22 minutes;
+    everything after is a body update on the same notification.
+    """
+    assert sounds("2026-08-30T09-40_10-20") == [
+        ("09:41:27", "NEW", "INFO", "БпЛА над Києвом"),
+        ("09:45:05", "NEW", "WATCH", "БпЛА поруч"),
+        ("09:46:01", "NEW", "WATCH", "БпЛА над домом — одне джерело"),
+        ("09:46:05", "PROMOTE", "URGENT", "БпЛА НАД ДОМОМ"),
+    ]
+
+
+def test_30_aug_typo_places_land_on_the_right_event():
+    """`Нивки на Шулявку.` reaches the home set and updates the URGENT in place;
+    AerisRimor's next line `Ні на Оболонь.` resolves to Оболонь -- Kyiv, but neither
+    home nor ring -- and lands on the INFO event instead. Under the placeholder
+    HOME=Оболонь of BEHAVIOR.md that same line fired an URGENT; with the real home set
+    it must not, and the two lines must not end up on the same notification.
+    """
+    assert [p for p in replay("2026-08-30T09-40_10-20")
+            if p[0] in ("09:50:32", "09:50:39")] == [
+        ("09:50:32", "UPDATE", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("09:50:39", "UPDATE", "INFO", "БпЛА над Києвом"),
+    ]
+
+
+def test_28_aug_every_home_pass_of_the_worst_night_rings_the_phone():
+    """28 Aug 00:30-08:00, the corpus's worst night: a drone loops back over Нивки and
+    Антонов all night. Every pass BEHAVIOR.md counted (00:35, 02:17, 02:45, 02:54,
+    05:09, 05:41, 07:08, 07:55) rings, and nothing between them does -- the reports
+    inside one pass are body updates on the live notification.
+
+    06:31 is the pass war_monitor's loitering marker `🔄 Гостомель` keeps alive: without
+    it the channel's 3-min type memory has expired by the time it posts the untyped
+    `Київ / 2х Нивки Новобіличі, Пріорка` and the pass goes unreported.
+
+    05:09 is the WATCH-then-promotion case: AerisRimor (w=0.7) alone says
+    `2 реактива Оболонь - Нивки київ.` and that is a WATCH; nebo_raketa's bare `Нивки`
+    41 s later is the second source that makes it URGENT. 07:55 is reply-chain
+    progression: AerisRimor's lone `Антонов.` is a reply into the chain it has been
+    tracking the drone through, so 0.7 is enough on its own.
+
+    Nine passes, nine sounds -- the night BEHAVIOR.md describes as "9 alarms between
+    00:35 and 07:55".
+    """
+    assert audible("2026-08-28T00-30_08-00") == [
+        ("00:35:53", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("00:55:22", "NEW", "WATCH", "БпЛА поруч"),
+        ("02:17:14", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("02:45:44", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("02:54:38", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("05:09:08", "NEW", "WATCH", "БпЛА поруч"),
+        ("05:09:37", "NEW", "WATCH", "БпЛА над домом — одне джерело"),
+        ("05:10:18", "PROMOTE", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("05:41:12", "NEW", "WATCH", "БпЛА поруч"),
+        ("05:41:58", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("06:17:12", "NEW", "WATCH", "БпЛА поруч"),
+        ("06:31:29", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("07:05:30", "NEW", "WATCH", "БпЛА поруч"),
+        ("07:08:12", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("07:51:24", "NEW", "WATCH", "БпЛА поруч"),
+        ("07:55:39", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
+    ]
+
+
+def test_28_aug_the_cooldown_changes_the_sounds_and_nothing_else():
+    """The lever the owner gets for "nine alarms in seven hours" (SPEC story 33) is the
+    per-tier cooldown, and it is the only thing that moves: same fixture, same rules,
+    a wider URGENT cooldown, and the phone rings five times instead of nine. The
+    notification count is identical -- the passes that no longer ring still update the
+    body in place, so the shade is as current either way.
+    """
+    quiet = audible("2026-08-28T00-30_08-00", cooldown_min={"URGENT": 60})
+    assert [p for p in quiet if p[2] == "URGENT"] == [
+        ("00:35:53", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("02:17:14", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("05:10:18", "PROMOTE", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("06:31:29", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("07:55:39", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
+    ]
+    assert (len(replay("2026-08-28T00-30_08-00", cooldown_min={"URGENT": 60}))
+            == len(replay("2026-08-28T00-30_08-00")))
+
+
+def test_30_aug_drones_over_other_regions_never_reach_the_phone():
+    """Reports whose only places are outside Kyiv and its oblast -- Чернігівщина,
+    Полтавщина, Дніпропетровщина -- are stored like every other message and pushed
+    nowhere, even while a drone is live over the home set (SPEC story 12)."""
+    other_regions = {"09:59:46", "10:08:36", "10:10:00", "10:17:29"}
+    assert [p for p in replay("2026-08-30T09-40_10-20")
+            if p[0] in other_regions] == []
+
+
+def test_faina_taun_resolves_to_the_home_set():
+    """SYNTHETIC fixture -- the corpus never says `файна таун`, so it cannot supply this
+    one. ЖК Файна Таун is where the household lives; ADR 6 makes it an alias of the home
+    set, and war_monitor's own `Київ: 🅿️ 1х реактив <place>` template carries it.
+    war_monitor is w=0.9, so one channel is enough to wake the house.
+
+    The other home alias, AerisRimor's misspelt `анонов`, is exercised on the real
+    30 Aug slice, where it is what promotes the home WATCH to URGENT at 09:46:05.
+    """
+    assert sounds("synthetic-home-alias-faina-taun") == [
+        ("04:00:00", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
+    ]
+
+
+def test_an_aggregator_echo_is_half_a_source_and_a_fresh_report_is_whole():
+    """SYNTHETIC fixture -- the corpus never lands an echo where it would change a tier,
+    so it cannot supply this one. Wording is verbatim (AerisRimor's `2 реактива Оболонь -
+    Нивки київ.` of 28 Aug 05:09:37, kyiv_nebo's bare `Нивки`, Ukrainian_Intelligence's
+    `Київ - реактивний на <place> ⚠️` template) with the home place substituted in.
+
+    AerisRimor (w=0.7) alone is a WATCH. kyiv_nebo (w=0.6) ten seconds later adds no
+    place AerisRimor had not already named -- the aggregator echo `channel-eval-kyiv_nebo`
+    measured -- so it counts half and the house stays asleep (0.79). Ukrainian_Intelligence
+    at the same w=0.6, fifty seconds later and outside the echo window, is a real second
+    pair of eyes and wakes it. Same weight, same place: only the fifteen seconds differ.
+    """
+    assert sounds("synthetic-echo-is-half-a-source") == [
+        ("03:30:00", "NEW", "WATCH", "БпЛА над домом — одне джерело"),
+        ("03:31:00", "PROMOTE", "URGENT", "БпЛА НАД ДОМОМ"),
+    ]
+
+
+def test_the_ntfy_boundary_never_makes_an_info_or_an_update_audible():
+    """The tier-to-priority mapping is what "INFO never sounds" actually rests on, so
+    assert it where the household's phone sees it: INFO is 2 and a body update is 1,
+    both below the threshold that rings anything, while URGENT is 5 and bypasses DND."""
+    sent = []
+    ntfy = notify.Ntfy({"url": "https://ntfy.example.net",
+                        "topics": {"URGENT": "urgent", "WATCH": "all", "INFO": "all"}})
+    with mock.patch.object(notify.urllib.request, "urlopen") as urlopen:
+        urlopen.side_effect = lambda request, timeout=None: sent.append(
+            json.loads(request.data)) or mock.MagicMock()
+        for kind in ("NEW", "UPDATE"):
+            for tier in ("URGENT", "WATCH", "INFO"):
+                ntfy(Push(datetime(2026, 8, 28, 2, 17), kind, tier, "t", "b", "tag"))
+
+    assert [(p["topic"], p["priority"]) for p in sent] == [
+        ("urgent", 5), ("all", 4), ("all", 2),      # NEW: URGENT bypasses DND, INFO silent
+        ("urgent", 1), ("all", 1), ("all", 1),      # UPDATE: a body update never sounds
     ]

@@ -20,7 +20,10 @@ LAUNCH = re.compile(
     r"|🚀 ?ще\b|🚀 ?пуск", re.I)
 BALLISTIC = re.compile(r"баліст|балист|☄|іскандер|кинжал", re.I)
 CLEAR = re.compile(r"чисто|зникл|втрачен|мінус|відбій|без цілей|вибух", re.I)
-DRONE = re.compile(r"реактив|бпла|шахед|мопед|дрон|🛵|🏍|🅿️", re.I)
+# 🔄 is war_monitor's loitering marker (33 corpus posts, all its own, all drones), the
+# same house style as 🅿️. Its bare `Nх` count prefix is NOT a drone word: 54 terse posts
+# use it for cruise, KAB and ПРР too.
+DRONE = re.compile(r"реактив|бпла|шахед|мопед|дрон|🛵|🏍|🅿️|🔄", re.I)
 # past tense and daily digests report what already happened -- never a launch
 PAST = re.compile(r"\bбули\b|збито|подавлено|зведення|застосован|атакував|протягом дня", re.I)
 RECON = re.compile(r"дорозвідк", re.I)
@@ -35,18 +38,21 @@ NON_KYIV = re.compile(
 # stem -> canonical place. Kyiv city/oblast only; everything else is out of scope.
 PLACES = {
     r"київ(?!ськ)|киев(?!ск)|столиц|над містом": "Київ",
-    r"оболон": "Оболонь", r"мінськ": "Мінський масив", r"пущ": "Пуща-Водиця",
+    r"оболон": "Оболонь", r"мінськ": "Мінський масив",
+    r"(?<![а-яіїєґ])пущ": "Пуща-Водиця",     # not `запущено`
     r"виноград": "Виноградар", r"куренів": "Куренівка", r"поділ": "Поділ",
     r"тро[єея]щ|тро[юя]\b": "Троєщина", r"нивк": "Нивки", r"дарниц": "Дарниця",
     r"двр": "ДВРЗ", r"вишнев": "Вишневе", r"антонов|анонов": "Антонов",
-    r"коцюб": "Коцюбинське", r"жулян": "Жуляни", r"святош": "Святошин",
+    r"(?<!михайло-)коцюб": "Коцюбинське",     # not Михайло-Коцюбинське, Чернігівщина
+    r"жулян": "Жуляни", r"святош": "Святошин",
     r"борщаг": "Борщагівка", r"голос": "Голосіїв", r"відрадн": "Відрадний",
     r"лівобереж": "Лівобережна", r"печерськ": "Печерськ", r"позняк": "Позняки",
     r"осокор": "Осокорки", r"лук.?янів": "Лук'янівка", r"шулявк": "Шулявка",
     r"русанів": "Русанівка", r"звіринц": "Звіринець", r"деміїв": "Деміївка",
     r"теремк": "Теремки", r"сирец|сирц": "Сирець", r"берков": "Берковець",
     r"білич": "Біличі", r"академ": "Академмістечко", r"рембаз": "Рембаза",
-    r"файна": "Файна Таун", r"лісов": "Лісовий", r"биківн": "Биківня",
+    # ЖК Файна Таун stands in the Антонов airspace; AerisRimor types Антонов as `анонов`
+    r"файна": "Антонов", r"лісов": "Лісовий", r"биківн": "Биківня",
     r"хотів": "Хотів", r"теличк": "Теличка",
     # Kyiv oblast: a launch on these is still a launch on us
     r"бровар": "Бровари", r"бориспіл": "Бориспіль", r"вишгород": "Вишгород",
@@ -74,6 +80,21 @@ class Parse:
 
 def places(text):
     return tuple(sorted({name for stem, name in PLACES.items() if re.search(stem, text, re.I)}))
+
+
+def zone(named, home, nearby):
+    """How close to the household a report is: HOME, NEARBY, KYIV, or None.
+
+    The whole geometry -- no coordinates, no distances, just which named set a
+    canonical place falls into (ADR 6). A report naming both takes the nearer one.
+    """
+    if not named:
+        return None
+    if any(place in home for place in named):
+        return "HOME"
+    if any(place in nearby for place in named):
+        return "NEARBY"
+    return "KYIV"
 
 
 def classify(text):
