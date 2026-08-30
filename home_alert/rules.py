@@ -30,14 +30,11 @@ APPROACH = re.compile(r"підліт|над містом|(?<!на )(?<!курс 
                       r"|на київ(?!щ|ськ)|на місто", re.I)
 # Only a bearing -> WATCH, never an immediate URGENT. The genitive `Києва` lives here and
 # not in the gazetteer, so `у напрямку Києва` can never promote a pending event by itself.
-DIRECTION = re.compile(r"(напрямк\w*|бік|сторону) (києв|київ)", re.I)
+DIRECTION = re.compile(r"(напрямк\w*|бік|сторону)\s+(києв|київ)", re.I)
 # Kyiv-gating is on the target, not on every name in the message: a wave `на Київ повз
 # Прилуки, Ніжин` is ours; `Ціль на Ромни!` is somebody else's (SPEC story 12).
 # `на місто` is deliberately absent: war_monitor writes it of Dnipro too.
 KYIV_TARGET = re.compile(r"на київ(?!щ|ськ)|курс(ом)? на київ", re.I)
-# Ordinals a channel counts its own launches with: «Четверта», «П'ятий, шостий та сьомий»
-ORDINALS = [("перш", 1), ("друг", 2), ("трет", 3), ("четверт", 4), (r"п.?ят", 5),
-            ("шост", 6), ("сьом", 7), ("восьм", 8), (r"дев.?ят", 9)]
 CLEAR = re.compile(r"чисто|зникл|втрачен|мінус|відбій|без цілей|вибух", re.I)
 # 🔄 is war_monitor's loitering marker (33 corpus posts, all its own, all drones), the
 # same house style as 🅿️. Its bare `Nх` count prefix is NOT a drone word: 54 terse posts
@@ -106,6 +103,11 @@ def places(text):
     return tuple(sorted({name for stem, name in PLACES.items() if re.search(stem, text, re.I)}))
 
 
+# Ordinals a channel counts its own launches with: «Четверта», «П'ятий, шостий та сьомий»
+ORDINALS = [("перш", 1), ("друг", 2), ("трет", 3), ("четверт", 4), (r"п.?ят", 5),
+            ("шост", 6), ("сьом", 7), ("восьм", 8), (r"дев.?ят", 9)]
+
+
 def count(text):
     """The largest figure a message states about itself -- an ordinal or a number.
 
@@ -138,13 +140,14 @@ def classify(text):
     terse = len(text) <= TERSE
     # a launch call is short, present tense and not an all-clear; the missile approach
     # forms answer to exactly the same three guards
-    live = (not is_threat and terse and not PAST.search(text) and not CLEAR.search(text))
+    present = (not is_threat and terse
+               and not PAST.search(text) and not CLEAR.search(text))
     return Parse(
         places=places(text),
         is_threat=is_threat,
-        is_launch=bool(LAUNCH.search(text)) and live,
-        is_approach=bool(APPROACH.search(text)) and live,
-        is_direction=bool(DIRECTION.search(text)) and live,
+        is_launch=bool(LAUNCH.search(text)) and present,
+        is_approach=bool(APPROACH.search(text)) and present,
+        is_direction=bool(DIRECTION.search(text)) and present,
         names_missile=bool(MISSILE.search(text)),
         targets_kyiv=bool(KYIV_TARGET.search(text)),
         count=count(text),

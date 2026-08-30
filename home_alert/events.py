@@ -161,9 +161,9 @@ def replay(messages, config, sink, store=None):
         pushes = []
 
         def emit(kind, tier, title, tag, count=0):
-            count = f"\u2265{count} \u00b7 " if count >= 2 else ""
+            shown = f"≥{count} · " if count >= 2 else ""
             push = Push(message.time, kind, tier, title,
-                        f"{count}{message.channel}: {text[:120]}", tag)
+                        f"{shown}{message.channel}: {text[:120]}", tag)
             sink(push)
             pushes.append(push)
 
@@ -205,13 +205,13 @@ def replay(messages, config, sink, store=None):
         # not a drone marker: 54 of those posts are KP, KAB and PRR (issue #4 note).
         missile = parse.names_missile and not parse.is_drone
 
-        # -- stage 2: launch. `у напрямку Києва` is a bearing and opens a WATCH; only an
-        # approach word (`підліт`, `захід`, `на Київ`) makes a place a missile's target.
-        # a drone report is never a launch, however much it reads like one
-        # ("1 Заворичі на вихід" names Київщина and matches the launch vocabulary)
-        # `підліт`/`заліт` with no Kyiv place is a cruise missile approaching somebody
-        # else's city -- eleven of them in the corpus (Новий Буг, Оржиця, Козельщина).
-        # Only a bearing on Kyiv or a launch call with no target at all opens a WATCH.
+        # -- stage 2: launch. Three ways a cruise wave becomes ours: a bearing that says
+        # Kyiv (`у напрямку Києва` -- a WATCH, never an immediate URGENT), an approach
+        # word over a Kyiv place (`БРОВАРИ ПІДЛІТ КР!`), or a launch call with no target
+        # at all (`Вихід другого Циркону`). An approach word alone is somebody else's
+        # city: eleven of those in the corpus (Новий Буг, Оржиця, Козельщина, Канів).
+        # A drone report is never a launch, however much it reads like one
+        # ("1 Заворичі на вихід" names Київщина and matches the launch vocabulary).
         launching = parse.is_launch or (missile and (parse.is_direction
                                                      or (parse.is_approach and parse.places)))
         if (launching and (ballistic_context or missile or parse.places)
