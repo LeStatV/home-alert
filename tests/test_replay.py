@@ -3,9 +3,11 @@ import re
 from datetime import datetime
 from unittest import mock
 
-from home_alert import notify
+import yaml
+
+from home_alert import cli, events, notify, reader, store
 from home_alert.notify import Push
-from harness import audible, bodies, replay, sounds
+from harness import FIXTURES, ROOT, audible, bodies, replay, sent, sounds
 
 
 def test_21_aug_ballistic_launch_watch_then_urgent():
@@ -271,6 +273,12 @@ def test_28_aug_every_home_pass_of_the_worst_night_rings_the_phone():
 
     Nine passes, nine sounds -- the night BEHAVIOR.md describes as "9 alarms between
     00:35 and 07:55".
+
+    06:32:14 is the tenth audible push and not a home pass: war_monitor's `🅿️ 2х
+    Борщагівки, Святопетрівське` raises the ring event's count from nothing to two,
+    fifteen minutes after the ring last rang. A count jump is one of the four things
+    SPEC story 7 allows to sound again, and the per-tier cooldown gates it like any
+    other sound.
     """
     assert audible("2026-08-28T00-30_08-00") == [
         ("00:35:53", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
@@ -285,6 +293,7 @@ def test_28_aug_every_home_pass_of_the_worst_night_rings_the_phone():
         ("05:41:58", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
         ("06:17:12", "NEW", "WATCH", "БпЛА поруч"),
         ("06:31:29", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("06:32:14", "RESOUND", "WATCH", "БпЛА поруч"),
         ("07:05:30", "NEW", "WATCH", "БпЛА поруч"),
         ("07:08:12", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
         ("07:51:24", "NEW", "WATCH", "БпЛА поруч"),
@@ -489,3 +498,224 @@ def test_19_aug_the_evening_essay_never_declares_a_threat():
     surveys. It is an essay, not a report -- before it was filtered it pushed an INFO
     `Загроза балістики` three times in the corpus (story 22)."""
     assert replay("2026-08-19T18-11_18-20") == []
+
+
+def test_the_kyiv_siren_is_a_signal_in_every_push_and_never_a_gate():
+    """SYNTHETIC fixture -- the corpus has no `@air_alert_ua` file, so the siren feed
+    cannot come from it. Wording follows the channel's own two lines, a region hashtag
+    and a state (`🔴 #м_Київ / Повітряна тривога!`, `🟢 #м_Київ / Відбій тривоги!`).
+
+    The siren feed carries no profile and no weight: it is read for one bit, the state
+    of the siren in м. Київ, which every push then shows (SPEC story 24). Kharkiv's
+    siren is not ours and moves nothing. And the bit never gates a tier -- the drone
+    over the home set is URGENT under a live siren and URGENT after the all-clear.
+    """
+    pushes = bodies("synthetic-siren-signal")
+    assert [p[:4] for p in pushes] == [
+        ("04:00:30", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("04:02:00", "NEW", "URGENT", "БАЛІСТИКА на Київ"),
+        ("04:05:00", "UPDATE", "URGENT", "БпЛА НАД ДОМОМ"),
+    ]
+    assert "🔴" in pushes[0][4], pushes[0][4]
+    assert "🟢" in pushes[2][4], pushes[2][4]
+
+
+def test_28_aug_the_body_carries_the_chain_its_sources_and_the_age_of_the_report():
+    """SPEC story 9, on the 05:09 pass of the corpus's worst night. AerisRimor opens the
+    home event with `2 реактива Оболонь - Нивки київ.` and nebo_raketa's bare `Нивки`
+    41 s later promotes it; the body of that one notification carries the chain the
+    drone has flown, both channels that reported it, when the last report came in, the
+    official siren and how many of the six channels are still talking.
+
+    The full loop of AC 1, `Оболонь → Нивки → Вишневе`, spans two notifications and not
+    one: the event key is the zone (#4), Нивки is the home set and Вишневе is neither
+    home nor ring, so war_monitor's `через Оболонь у напрямку Вишневе` six seconds
+    earlier updates the Kyiv-wide INFO instead. Each body shows its own places.
+    """
+    pushes = bodies("2026-08-28T00-30_08-00")
+    home = [p for p in pushes if p[0] == "05:10:18"][0]
+    assert home[:4] == ("05:10:18", "PROMOTE", "URGENT", "БпЛА НАД ДОМОМ")
+    assert "Оболонь → Нивки" in home[4], home[4]
+    assert "AerisRimor" in home[4] and "nebo_raketa" in home[4], home[4]
+    assert "звіт 05:10:18 (щойно)" in home[4], home[4]
+    assert re.search(r"\b[1-6]/6 каналів активні", home[4]), home[4]
+
+    kyiv = [p for p in pushes if p[0] == "05:10:12"][0]
+    assert kyiv[:4] == ("05:10:12", "UPDATE", "INFO", "БпЛА над Києвом")
+    assert "Оболонь → Вишневе" in kyiv[4], kyiv[4]
+
+
+def sent_payloads(*pushes):
+    """What the ntfy client actually puts on the wire for these pushes."""
+    sent = []
+    ntfy = notify.Ntfy({"url": "https://ntfy.example.net",
+                        "topics": {"URGENT": "urgent", "WATCH": "all", "INFO": "all"}})
+    with mock.patch.object(notify.urllib.request, "urlopen") as urlopen:
+        urlopen.side_effect = lambda request, timeout=None: sent.append(
+            json.loads(request.data)) or mock.MagicMock()
+        for push in pushes:
+            ntfy(push)
+    return sent
+
+
+def test_the_ntfy_boundary_replaces_the_live_notification_and_links_the_source():
+    """One event, one entry in the notification shade (SPEC story 6). ntfy links
+    messages into a sequence: publish again with the same `sequence_id` and the client
+    replaces the notification it already showed, rather than stacking a new one
+    (docs.ntfy.sh/publish "Updating notifications", server + Android >= 2.16). The
+    event tag is that id, so the trajectory updates in place.
+
+    The source post rides along as ntfy's `view` action -- one tap opens the Telegram
+    message the alert was read from (SPEC story 10).
+    """
+    when = datetime(2026, 8, 28, 2, 17)
+    tag = "drone-home-20260828T021714"
+    first, update = sent_payloads(
+        Push(when, "NEW", "URGENT", "БпЛА НАД ДОМОМ", "AerisRimor: Нивки", tag,
+             source="https://t.me/AerisRimor/12345"),
+        Push(when, "UPDATE", "URGENT", "БпЛА НАД ДОМОМ", "nebo_raketa: Нивки", tag))
+
+    assert first["sequence_id"] == tag and update["sequence_id"] == tag
+    assert first["actions"] == [{"action": "view", "label": "Джерело",
+                                 "url": "https://t.me/AerisRimor/12345"}]
+    assert "actions" not in update      # nothing to link: no source, no button
+
+
+def test_the_all_clear_is_one_silent_info_after_ten_quiet_minutes_and_a_clear_call():
+    """SYNTHETIC fixture -- the household's own corridor signal, and the corpus has no
+    slice that puts a home pass, a clear call and ten quiet minutes in one window.
+    Wording is verbatim (war_monitor's `Київ: 🅿️ 1х реактив <place>` template,
+    AerisRimor's `Чисто.`, war_monitor's oblast drone line).
+
+    A drone over the home set wakes the house at 02:00. AerisRimor says it is clear a
+    minute later, then nothing touches the home set or the ring for ten minutes: the
+    household gets one silent INFO telling it to come out of the corridor (story 8),
+    and only one -- the next message does not repeat it.
+    """
+    pushes = bodies("synthetic-all-clear-after-quiet")
+    assert [p[:4] for p in pushes] == [
+        ("02:00:00", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("02:12:00", "CLEAR", "INFO", "Відбій — БпЛА над домом"),
+    ]
+    # and the age of that last report is the point of it: twelve minutes of nothing
+    assert "звіт 02:00:00 (12 хв тому)" in pushes[1][4], pushes[1][4]
+
+
+def test_quiet_alone_is_never_an_all_clear():
+    """SYNTHETIC fixture. The same night without the clear call: eleven quiet minutes
+    pass with the Kyiv siren still sounding and no all-clear is sent -- a drone that
+    stops being reported may just have stopped being seen (ADR 10). The official siren
+    ending is the other half of the AND, and it releases the all-clear on the first
+    message after it.
+    """
+    assert replay("synthetic-all-clear-needs-more-than-quiet") == [
+        ("03:00:30", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("03:13:00", "CLEAR", "INFO", "Відбій — БпЛА над домом"),
+    ]
+
+
+def test_a_count_jump_over_the_home_set_rings_again():
+    """SYNTHETIC fixture -- the corpus never raises a count over the home set outside
+    the cooldown, so it cannot supply this one. Wording is war_monitor's own
+    `Київ: 🅿️ Nх реактив <place>` template.
+
+    One drone over the house wakes the household. Six minutes later the same channel
+    says there are four: that is new information, not the same chatter, and SPEC story
+    7 lists a count jump among the four things allowed to ring again. The count itself
+    goes in the body, `≥4`, from the best single source (story 23). Restating four
+    changes nothing -- the same count is the same fact, whatever the cooldown allows.
+    """
+    pushes = bodies("synthetic-count-jump")
+    assert [p[:4] for p in pushes] == [
+        ("02:00:00", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("02:06:00", "RESOUND", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("02:07:00", "UPDATE", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("02:12:00", "UPDATE", "URGENT", "БпЛА НАД ДОМОМ"),
+    ]
+    assert pushes[1][4].startswith("≥4 "), pushes[1][4]
+
+
+def test_the_system_topic_warns_when_every_channel_goes_quiet_under_a_siren():
+    """SYNTHETIC fixture -- coverage going dark is the one thing the corpus cannot
+    show, since the corpus is what the channels did post. The siren feed's own
+    nationwide traffic is what keeps the clock running while the six are silent.
+
+    A drone over the house at 03:30, the Kyiv siren from 03:30:05, and then nobody
+    says anything for eleven minutes: the owner is told his eyes are shut (story 15).
+    Once per siren, on the `system` topic, and never again while it lasts.
+
+    03:30-03:45 UTC is inside kyiv_nebo's 03:00-07:00 blackout, so that channel's
+    silence is its habit and is exempt -- the warning here is the other five.
+    """
+    pushes = sent("synthetic-silent-while-siren")
+    assert [(f"{p.time:%H:%M:%S}", p.kind, p.tier, p.title) for p in pushes] == [
+        ("03:30:00", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("03:41:00", "SYSTEM", "INFO", "Канали мовчать під тривогою"),
+    ]
+    assert pushes[1].topic == "system"
+    assert "kyiv_nebo" not in pushes[1].body, pushes[1].body
+    assert "war_monitor" in pushes[1].body, pushes[1].body
+
+
+def test_the_siren_state_is_stored_on_the_event(tmp_path):
+    """Not just shown: kept, so the household can later ask how often an URGENT beat
+    the siren (SPEC story 24). The events table is where the answer will come from.
+    Read here at the store because that is the boundary the criterion names."""
+    saved = store.Store(str(tmp_path / "home-alert.db"))
+    config = yaml.safe_load((ROOT / "config.yaml").read_text())
+    config["profiles"] = ROOT / "profiles"
+    events.replay(reader.read_corpus(FIXTURES / "synthetic-siren-signal.jsonl"),
+                  config, notify.Recorder(), saved)
+    assert saved.db.execute("select title, siren from events").fetchall() == [
+        ("БАЛІСТИКА на Київ", "on")]
+
+
+def test_replay_over_the_live_database_reproduces_the_recorded_pushes(tmp_path, capsys,
+                                                                     monkeypatch):
+    """SPEC story 34 against the live trail instead of the corpus. Everything the agent
+    receives is stored, so any night can be re-run through the current rules straight
+    out of `data/home-alert.db` -- and re-running a night nobody has changed the rules
+    for must reproduce, push for push, what the household was actually sent.
+
+    The notifications table is the household's copy of that; comparing to it is the
+    criterion's own boundary.
+    """
+    db = str(tmp_path / "home-alert.db")
+    config = yaml.safe_load((ROOT / "config.yaml").read_text())
+    config["profiles"] = ROOT / "profiles"
+
+    live = store.Store(db)          # pass 1: a night, as `run` would have written it
+    events.replay(reader.read_corpus(FIXTURES / "2026-08-27T00-00_00-30.jsonl"),
+                  config, notify.Recorder(), live)
+
+    again = notify.Recorder()       # pass 2: the same night, back out of the store
+    events.replay(live.messages(datetime(2026, 8, 27), datetime(2026, 8, 28)),
+                  config, again, store.Store(":memory:"))
+
+    assert again.pushes, "expected the stored night to push something"
+    assert [(p.time.isoformat(), p.kind, p.tier, p.title) for p in again.pushes] == \
+        live.db.execute("select time, kind, tier, title from notifications").fetchall()
+
+    monkeypatch.chdir(ROOT)         # and the same thing through the command line
+    capsys.readouterr()
+    assert cli.main(["replay", "2026-08-27T00:00", "2026-08-27T00:30",
+                     "--db", db, "--from-db"]) == 0
+    printed = capsys.readouterr().out
+    assert printed.splitlines()[0].endswith("2026-08-27T00:00 .. 2026-08-27T00:30")
+    assert "БАЛІСТИКА на Київ" in printed
+
+
+def test_the_all_clear_follows_its_event_to_the_topic_it_woke_the_house_on():
+    """ntfy identifies a notification by (server, topic, sequence_id), so the same tag
+    on another topic is another notification. A home event that opens as a WATCH on
+    `all` and is promoted to URGENT on `urgent` has to be closed on `urgent`: anywhere
+    else and the household is left with a live alarm on the phone and an all-clear
+    filed under a topic the family does not even subscribe to.
+
+    The same fixture as the echo test, plus a clear call and eleven quiet minutes.
+    """
+    clear = [p for p in sent("synthetic-echo-is-half-a-source") if p.kind == "CLEAR"]
+    assert [(f"{p.time:%H:%M:%S}", p.tier, p.title, p.topic) for p in clear] == [
+        ("03:42:00", "INFO", "Відбій — БпЛА над домом", "urgent")]
+    # and it is filed under the URGENT topic without ringing like one
+    assert sent_payloads(clear[0])[0]["priority"] == 1

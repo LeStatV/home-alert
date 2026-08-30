@@ -31,6 +31,10 @@ ballistic:
   resound_gap_min: 2       # minimum gap between sounds on one event; the rest of the
                            # three-stage timings are fixed by the spec, see events.py
 
+system:
+  heartbeat_min: 360   # "Агент працює" on the `system` topic; every beat replaces the
+                       # last one, so the owner reads one line, not a column of them
+
 ntfy:
   url: https://ntfy.example.net
   token_env: NTFY_TOKEN

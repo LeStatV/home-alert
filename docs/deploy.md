@@ -6,9 +6,12 @@ in `./data`.
 
 ## Prerequisites
 
-- Docker with compose, and a Telegram account that **has joined all six channels**:
-  Telegram only pushes updates for dialogs the account is in. A channel it cannot see
-  is logged at startup (`channel X: not joined`) and the other five keep working.
+- Docker with compose, and a Telegram account that **has joined all seven channels** --
+  the six in `profiles/` plus `@air_alert_ua`, which carries no profile and is read only
+  for the state of the Kyiv siren. Telegram only pushes updates for dialogs the account
+  is in. A channel it cannot see is logged at startup (`channel X: not joined`) and the
+  rest keep working; without `@air_alert_ua` every push reads `⚪ сирена невідома` and
+  the all-clear waits for a channel to say it is over.
 - API credentials from https://my.telegram.org -> API development tools.
 - `.env` next to `docker-compose.yml` (gitignored, never committed):
 
@@ -55,10 +58,22 @@ anonymous subscriber sees nothing.
 - **iOS**: needs `upstream-base-url: https://ntfy.sh` (already in `ntfy/server.yml`)
   for APNS to deliver at all.
 - **Android**: turn on instant delivery in the app, or pushes arrive in batches.
+- **Replace-in-place**: one event owns one entry in the notification shade, which the
+  agent gets by publishing every update with the same ntfy `sequence_id`
+  ([docs.ntfy.sh/publish](https://docs.ntfy.sh/publish/#updating-notifications)). This
+  needs the ntfy **server >= 2.16** (pinned in `docker-compose.yml`) and the **Android
+  app >= 1.22.2** (the app is versioned 1.x, the server 2.x). iOS is not on ntfy's supported list for notification updates, so an
+  iPhone stacks the updates -- there is nothing the agent can send to change that.
+  Worth an eyeball on the phone after the first raid: the trajectory should rewrite one
+  notification, not add one per report.
 
 ## Checking it
 
-    docker compose logs -f agent      # "following 6/6 channels: ..." then the pushes
+    docker compose logs -f agent      # "following 7/7 channels: ..." then the pushes
 
-`home-alert replay <from> <to> --db data/home-alert.db` re-runs the rules over what
-was stored.
+The `system` topic should show `Агент запущено` within seconds of the start, then
+`Агент працює` every `system.heartbeat_min` minutes (one entry, replaced in place).
+
+`home-alert replay <from> <to> --db data/home-alert.db --from-db` re-runs the current
+rules over what the agent stored that night and prints what it would send now. Without
+`--from-db` the same command replays the research corpus and records into that file.

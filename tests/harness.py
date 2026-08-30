@@ -26,6 +26,12 @@ def replay(fixture, cooldown_min=None, **overrides):
 def bodies(fixture, cooldown_min=None, **overrides):
     """The same pushes as `replay`, plus the body -- where the `>=N` count is shown.
     Titles are asserted exactly; a body is matched loosely, by what it contains."""
+    return [(f"{p.time:%H:%M:%S}", p.kind, p.tier, p.title, p.body)
+            for p in sent(fixture, cooldown_min, **overrides)]
+
+
+def sent(fixture, cooldown_min=None, **overrides):
+    """The raw `Push` objects, for the fields the tuples drop -- topic and source."""
     config = yaml.safe_load((ROOT / "config.yaml").read_text())
     config["profiles"] = ROOT / "profiles"
     config["ballistic"].update(overrides)
@@ -33,8 +39,7 @@ def bodies(fixture, cooldown_min=None, **overrides):
     recorder = notify.Recorder()
     events.replay(reader.read_corpus(FIXTURES / f"{fixture}.jsonl"), config,
                   recorder, store.Store(":memory:"))
-    return [(f"{p.time:%H:%M:%S}", p.kind, p.tier, p.title, p.body)
-            for p in recorder.pushes]
+    return recorder.pushes
 
 
 def sounds(fixture, **overrides):
