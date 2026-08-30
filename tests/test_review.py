@@ -50,11 +50,12 @@ def seed(tmp_path, texts=None, channel=CHANNEL):
     return str(tmp_path / "home-alert.db")
 
 
-def config(tmp_path, provider="none"):
+def config(tmp_path, provider="none", channels=(CHANNEL,)):
     """The household config as `review` reads it: profiles, geometry, provider."""
     directory = tmp_path / "profiles"
     directory.mkdir(exist_ok=True)
-    shutil.copy(ROOT / "profiles" / f"{CHANNEL}.yaml", directory / f"{CHANNEL}.yaml")
+    for channel in channels:
+        shutil.copy(ROOT / "profiles" / f"{channel}.yaml", directory / f"{channel}.yaml")
     return {"profiles": directory, "llm": {"provider": provider},
             "home": ["Нивки", "Антонов"], "nearby": ["Святошин", "Борщагівка"]}
 
@@ -253,3 +254,43 @@ def test_a_store_nobody_has_written_to_still_says_so_once(tmp_path, capsys):
     assert "which is empty" in capsys.readouterr().out
     assert [push.body for push in sink.pushes] == [
         "0 unparsed across 0 channels, 0 proposals written"]
+
+
+SECOND = "nebo_raketa"           # a second profile with no `default_type` either
+GEESE = ["гуси над Оболонню", "дві гуски курсом на Позняки"]
+
+
+def test_a_night_across_two_channels_is_one_file_patch_still_takes(tmp_path,
+                                                                   monkeypatch):
+    """The nightly run is several channels, and their hunks are concatenated into one
+    review file. `patch` has to take the whole of it in one go, and each channel's
+    examples have to stay that channel's: the verbatim gate is per channel, so
+    war_monitor's messages may not be proposed as examples of @nebo_raketa."""
+    settings = config(tmp_path, "openai", (CHANNEL, SECOND))
+    db = seed(tmp_path)
+    seed(tmp_path, GEESE, SECOND)
+    monkeypatch.setattr(llm, "client", lambda config: FakeLLM())
+    sink = notify.Recorder()
+    file = review.review(settings, db, sink=sink)
+
+    text = file.read_text(encoding="utf-8")
+    assert text.count("--- profiles/") == 2
+    assert f"profiles/{SECOND}.yaml" in text
+    subprocess.run(["patch", "-p0", "-d", str(tmp_path)], stdin=file.open(),
+                   check=True, capture_output=True)
+
+    loaded = profiles.load(settings["profiles"])
+    assert [e["text"] for e in loaded[SECOND].examples if e["text"] in UNPARSED] == []
+    for channel, profile in loaded.items():
+        for example in profile.examples:
+            got = seam_2(profile, example)
+            listed = set(example) - {"text"}
+            assert {f: got[f] for f in listed} == {f: example[f] for f in listed}, (
+                channel, example)
+    assert sink.pushes[0].body == "6 unparsed across 2 channels, 2 proposals written"
+
+
+def test_a_week_is_a_window_too():
+    """`--since 7d` after a quiet week, and `7d` is the other half of the parser."""
+    assert review.window("7d") == timedelta(days=7)
+    assert review.window("24h") == review.window("1d")
