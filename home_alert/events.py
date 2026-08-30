@@ -143,25 +143,38 @@ class Drone:
         self.last = message.time
 
 
-def replay(messages, config, sink, store=None):
-    """Feed messages through the rules and push what the household would have seen."""
-    channels = profiles.load(config["profiles"])
-    resound_gap = timedelta(minutes=config["ballistic"]["resound_gap_min"])
-    home, nearby = set(config["home"]), set(config["nearby"])
-    cooldown = {tier: timedelta(minutes=minutes)
-                for tier, minutes in config["drone"]["cooldown_min"].items()}
+class Pipeline:
+    """One pass of the two state machines over a message stream.
 
-    live = {}            # event type -> the one live event of that type
-    threat_until = None
-    context = Context()
-    drones = {}          # zone -> the live Drone event there
-    sounded = {}         # (zone, tier) -> when it last made a noise, for the cooldowns
-    tracked = {}         # (channel, msg id) -> (time, zone) of a drone report
+    `replay` and the live reader both hand messages in here one at a time; nothing
+    downstream of this point knows which of the two it is talking to.
+    """
 
-    for message in messages:
-        profile = channels.get(message.channel)
+    def __init__(self, config, sink, store=None):
+        self.channels = profiles.load(config["profiles"])
+        self.resound_gap = timedelta(minutes=config["ballistic"]["resound_gap_min"])
+        self.home, self.nearby = set(config["home"]), set(config["nearby"])
+        self.cooldown = {tier: timedelta(minutes=minutes)
+                         for tier, minutes in config["drone"]["cooldown_min"].items()}
+        self.sink, self.store = sink, store
+
+        self.live = {}            # event type -> the one live event of that type
+        self.threat_until = None
+        self.context = Context()
+        self.drones = {}          # zone -> the live Drone event there
+        self.sounded = {}         # (zone, tier) -> when it last made a noise
+        self.tracked = {}         # (channel, msg id) -> (time, zone) of a drone report
+
+    def feed(self, message):
+        """One message in, whatever it is worth in pushes out.
+
+        ponytail: the clock is `message.time` on both paths -- live, that is Telegram's
+        own timestamp, i.e. wall clock modulo delivery lag. Nothing here is timer-driven,
+        so a stale event closes on the next message rather than on the second it expires.
+        """
+        profile = self.channels.get(message.channel)
         if profile is None:      # no profile, no channel: the files are the channel list
-            continue
+            return
         text = " ".join(message.text.split())
         parse = rules.classify(text, profile)
         pushes = []
@@ -170,43 +183,44 @@ def replay(messages, config, sink, store=None):
             shown = f"≥{count} · " if count >= 2 else ""
             push = Push(message.time, kind, tier, title,
                         f"{shown}{message.channel}: {text[:120]}", tag)
-            sink(push)
+            self.sink(push)
             pushes.append(push)
 
         def done(event=None):
-            if store:
-                store.record(message, parse, event, pushes)
+            if self.store:
+                self.store.record(message, parse, event, pushes)
 
         if not text or parse.is_noise:
             done()
-            continue
+            return
 
         # spec order is noise -> context -> rules: an ad must not set the channel's type
-        in_context, threat_type = context.assemble(message, text, parse)
+        in_context, threat_type = self.context.assemble(message, text, parse)
         if in_context is None:      # a bump: the same text re-posted as a reply
             done()
-            continue
+            return
         parse = in_context
         threat_type = threat_type or profile.default_type
 
         # the message clock closes stale events and expires unconfirmed launches
-        for etype, stale in list(live.items()):
+        for etype, stale in list(self.live.items()):
             if (message.time - stale.last_launch > EVENT_TTL
                     or (stale.pending and message.time - stale.opened > PENDING_TTL)):
-                del live[etype]
+                del self.live[etype]
 
         # -- stage 1: declared threat -> one silent INFO per window
         if parse.is_threat:
             # a threat during a live event is noise: the household is already alarmed
-            if "ballistic" not in live and (threat_until is None
-                                            or message.time > threat_until):
+            if "ballistic" not in self.live and (self.threat_until is None
+                                                 or message.time > self.threat_until):
                 emit("NEW", "INFO", THREAT_TITLE, f"threat-{message.time:%Y%m%dT%H%M%S}")
-            threat_until = message.time + THREAT_WINDOW
+            self.threat_until = message.time + THREAT_WINDOW
             done()
-            continue
+            return
 
-        ballistic_context = (parse.names_ballistic or "ballistic" in live
-                             or (threat_until is not None and message.time <= threat_until))
+        ballistic_context = (parse.names_ballistic or "ballistic" in self.live
+                             or (self.threat_until is not None
+                                 and message.time <= self.threat_until))
         # a cruise missile says so in its own words. war_monitor's `Nx ...` house style is
         # not a drone marker: 54 of those posts are KP, KAB and PRR (issue #4 note).
         missile = rules.type_of(parse) == "missile"
@@ -230,10 +244,10 @@ def replay(messages, config, sink, store=None):
             if parse.names_non_kyiv and not (parse.targets_kyiv or parse.is_direction):
                 etype = "other"
             target = parse.places if etype != "missile" or parse.is_approach else ()
-            event = live.get(etype)
+            event = self.live.get(etype)
             if event is None:
-                event = live[etype] = Event(etype, message.time, message.time,
-                                            message.time, pending=not target)
+                event = self.live[etype] = Event(etype, message.time, message.time,
+                                                 message.time, pending=not target)
                 kind = "NEW"
             else:
                 event.launches += 1
@@ -243,7 +257,7 @@ def replay(messages, config, sink, store=None):
                 # window; nebo_raketa's 21 Aug 22:15:36 re-post came 3 m 30 s later.
                 kind = ("PROMOTE" if event.pending and target else
                         "RESOUND" if not event.pending and text != event.last_text
-                        and message.time - event.sounded >= resound_gap else "UPDATE")
+                        and message.time - event.sounded >= self.resound_gap else "UPDATE")
                 if kind != "UPDATE":
                     event.pending = False
                     event.sounded = message.time
@@ -252,7 +266,7 @@ def replay(messages, config, sink, store=None):
             if etype != "other":
                 emit(kind, event.tier, event.title, event.tag, event.count)
             done(event)
-            continue
+            return
 
         # -- stage 3: trajectory -- bare place names while the ballistic event is live.
         # ponytail: a live *missile* event deliberately does not claim them. Its body
@@ -260,7 +274,7 @@ def replay(messages, config, sink, store=None):
         # wave would otherwise have swallowed the bare `Нивки` reports for five minutes
         # and cost the household its drone URGENT over the home set. The trade goes the
         # other way when replace-in-place is actually wired up (notify.py).
-        event = live.get("ballistic")
+        event = self.live.get("ballistic")
         if (event and parse.places and parse.terse
                 and not parse.names_non_kyiv and not parse.is_drone and not parse.is_recon):
             event.fold(message, parse, parse.places)
@@ -271,13 +285,13 @@ def replay(messages, config, sink, store=None):
             else:
                 emit("UPDATE", event.tier, event.title, event.tag, event.count)
             done(event)
-            continue
+            return
 
         # -- stage 4: impact / all-clear -- body update only, never a sound
         if event and parse.is_clear:
             emit("UPDATE", event.tier, event.title, event.tag, event.count)
             done(event)
-            continue
+            return
 
         # -- drones. A report is a place plus a type; the type is usually not in the
         # message ("Нивки"), it is what the channel has been talking about. Reports about
@@ -285,21 +299,21 @@ def replay(messages, config, sink, store=None):
         drone_report = (threat_type == "drone" and parse.places and parse.terse
                         and not parse.names_non_kyiv and not parse.is_clear
                         and not parse.is_recon)
-        zone = rules.zone(parse.places, home, nearby) if drone_report else None
+        zone = rules.zone(parse.places, self.home, self.nearby) if drone_report else None
         if zone:
-            tracked = {k: v for k, v in tracked.items()
-                       if message.time - v[0] <= DRONE_WINDOW}
+            self.tracked = {k: v for k, v in self.tracked.items()
+                            if message.time - v[0] <= DRONE_WINDOW}
             # progression, not repetition: the channel tracked this drone through some
             # other zone and now puts it here. Replying to its own report of the same
             # zone is the same fact again and must not buy a channel its second source.
-            parent = tracked.get((message.channel, message.reply_to))
+            parent = self.tracked.get((message.channel, message.reply_to))
             chained = bool(parent) and parent[1] != zone
-            tracked[(message.channel, message.id)] = (message.time, zone)
+            self.tracked[(message.channel, message.id)] = (message.time, zone)
 
-            drone = drones.get(zone)
+            drone = self.drones.get(zone)
             fresh = drone is None or message.time - drone.last > DRONE_WINDOW
             if fresh:
-                drone = drones[zone] = Drone(zone, message.time, message.time)
+                drone = self.drones[zone] = Drone(zone, message.time, message.time)
             was = drone.tier
             drone.report(message, parse.places, profile.weight, chained)
 
@@ -308,17 +322,25 @@ def replay(messages, config, sink, store=None):
             # out silently, so the body on the phone stays current (spec story 33). It is
             # kept per zone rather than globally per tier -- a drone that has moved from
             # the ring to over the house is new information at the same tier.
-            last = sounded.get((zone, drone.tier))
-            if kind != "UPDATE" and last and message.time - last < cooldown[drone.tier]:
+            last = self.sounded.get((zone, drone.tier))
+            if (kind != "UPDATE" and last
+                    and message.time - last < self.cooldown[drone.tier]):
                 kind = "UPDATE"
             if kind != "UPDATE":
-                sounded[(zone, drone.tier)] = message.time
+                self.sounded[(zone, drone.tier)] = message.time
             emit(kind, drone.tier, drone.title, drone.tag)
             # ponytail: drone events have no row of their own yet, so record no event
             # rather than the unrelated live ballistic one -- a notifications-to-events
             # join would otherwise credit these pushes to it. Every message and every
             # push is stored, so a night of drones still replays from those two tables.
             done()
-            continue
+            return
 
         done()
+
+
+def replay(messages, config, sink, store=None):
+    """Feed messages through the rules and push what the household would have seen."""
+    pipeline = Pipeline(config, sink, store)
+    for message in messages:
+        pipeline.feed(message)
