@@ -62,6 +62,10 @@ class Event:
 
     @property
     def tier(self):
+        # `other` never reaches ntfy, so its column in the events table says so rather
+        # than claiming a tier the household was never sent.
+        if self.type == "other":
+            return "LOG"
         return "WATCH" if self.pending else "URGENT"
 
     @property
