@@ -1,5 +1,9 @@
 """Deterministic classification of one message. Regex only -- the launch path
-never waits on anything. Vocabulary is global in v1; per-channel profiles come later.
+never waits on anything.
+
+The vocabulary here is global: every channel says `баліст` and `Нивки` the same way.
+A `profiles.Profile` extends it with what one channel alone does -- its own ads and
+digests, its own wording, its own spellings of a place (SPEC "Profiles as data").
 """
 import re
 from dataclasses import dataclass
@@ -43,6 +47,10 @@ DRONE = re.compile(r"реактив|бпла|шахед|мопед|дрон|🛵
 # past tense and daily digests report what already happened -- never a launch
 PAST = re.compile(r"\bбули\b|збито|подавлено|зведення|застосован|атакував|протягом дня", re.I)
 RECON = re.compile(r"дорозвідк", re.I)
+# Ads and cross-promotions, which every channel runs. A launch message that carries a
+# donation footer (`✅Розвідка України | Чатик | Підтримати`, Ukrainian_Intelligence) is
+# still a launch, hence the ballistic exemption below -- which is exactly why the
+# essay/digest patterns are per-profile instead: an essay *is* about ballistics.
 NOISE = re.compile(r"підпис|@\w+|http|підтримати|чатик|реклам|картка фоп", re.I)
 # a launch naming one of these is a separate, log-only event (BEHAVIOR.md fix 1)
 NON_KYIV = re.compile(
@@ -141,7 +149,7 @@ def zone(named, home, nearby):
     return "KYIV"
 
 
-def classify(text):
+def classify(text, profile=None):
     is_threat = bool(THREAT.search(text))
     terse = len(text) <= TERSE
     # a launch call is short, present tense and not an all-clear; the missile approach
@@ -162,6 +170,7 @@ def classify(text):
         is_clear=bool(CLEAR.search(text)),
         is_drone=bool(DRONE.search(text)),
         is_recon=bool(RECON.search(text)),
-        is_noise=bool(NOISE.search(text)) and not BALLISTIC.search(text),
+        is_noise=(bool(NOISE.search(text)) and not BALLISTIC.search(text)
+                  or bool(profile and profile.noise and profile.noise.search(text))),
         terse=terse,
     )

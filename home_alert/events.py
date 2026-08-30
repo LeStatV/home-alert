@@ -163,7 +163,7 @@ def replay(messages, config, sink, store=None):
         if profile is None:      # no profile, no channel: the files are the channel list
             continue
         text = " ".join(message.text.split())
-        parse = rules.classify(text)
+        parse = rules.classify(text, profile)
         pushes = []
 
         def emit(kind, tier, title, tag, count=0):

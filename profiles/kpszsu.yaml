@@ -4,3 +4,9 @@ weight: 1.0              # the official anchor; on 22 Aug only it and war_monito
                          # reported the actual launch
 language: uk
 threads_by_reply: false  # 5% replies, and never to thread one target
+
+noise_patterns:
+  # the morning digest of what the air force shot down overnight: 15 in the corpus
+  # (22 Aug 06:10:34 `⚡️ ЗБИТО/ПОДАВЛЕНО 191 ЦІЛЬ ПРОТИВНИКА`). The slash is what makes
+  # this safe: a mid-raid `збито` in a terse post is an impact report and stays one.
+  - 'збито\s*/\s*подавлено'

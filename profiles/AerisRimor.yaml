@@ -3,3 +3,9 @@ title: "AerisRimor"
 weight: 0.7
 language: uk
 threads_by_reply: true   # 34% of posts are replies; terse bursts inside a chain
+
+noise_patterns:
+  # `🎩Зведення станом на 22:05` / `🎩Варто проговорити` -- its evening briefings, up to
+  # 2.2k characters (7 in the corpus), and its end-of-day digest (27 Aug 16:47:56)
+  - '^🎩'
+  - 'збито\s*/\s*подавлено'

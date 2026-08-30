@@ -3,3 +3,8 @@ title: "Небо ракета"
 weight: 0.8
 language: uk
 threads_by_reply: true   # 50% of posts are replies -- the most threaded channel
+
+noise_patterns:
+  # its retelling of the air force digest, same category, one in the corpus
+  # (20 Aug 06:23:26 `⚡️186 цілей збито/подавлено за ніч`)
+  - 'збито\s*/\s*подавлено'

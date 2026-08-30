@@ -4,3 +4,9 @@ weight: 0.9              # ARCHITECTURE #2; >=0.8, so a drone it puts over the h
                          # wakes the household on its word alone
 language: uk
 threads_by_reply: true   # 14% of posts are replies, and it bumps its own launch calls
+
+noise_patterns:
+  # its nightly briefing: 1.5k characters surveying every threat to the whole country,
+  # ballistics among them. Four in the corpus (19 Aug 18:16:19 is one), and before this
+  # three of them pushed an INFO `Загроза балістики` at the household (story 22).
+  - '^загальна оцінка загроз'
