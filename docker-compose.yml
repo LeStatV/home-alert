@@ -21,7 +21,10 @@ services:
     depends_on: [ntfy]
 
   ntfy:
-    image: binwiederhier/ntfy      # official server image (docs.ntfy.sh/install)
+    # Pinned: replace-in-place (`sequence_id`) needs server >= 2.16. An older server
+    # ignores the field rather than rejecting it -- alerts still arrive, they just
+    # stack in the shade instead of updating one entry.
+    image: binwiederhier/ntfy:v2.17.0      # official server image (docs.ntfy.sh/install)
     command: serve
     restart: unless-stopped
     # loopback only; put the host's Tailscale IP here (e.g. "100.x.y.z:80:80") to let

@@ -533,3 +533,39 @@ def test_28_aug_the_body_carries_the_chain_its_sources_and_the_age_of_the_report
     kyiv = [p for p in pushes if p[0] == "05:10:12"][0]
     assert kyiv[:4] == ("05:10:12", "UPDATE", "INFO", "БпЛА над Києвом")
     assert "Оболонь → Вишневе" in kyiv[4], kyiv[4]
+
+
+def sent_payloads(*pushes):
+    """What the ntfy client actually puts on the wire for these pushes."""
+    sent = []
+    ntfy = notify.Ntfy({"url": "https://ntfy.example.net",
+                        "topics": {"URGENT": "urgent", "WATCH": "all", "INFO": "all"}})
+    with mock.patch.object(notify.urllib.request, "urlopen") as urlopen:
+        urlopen.side_effect = lambda request, timeout=None: sent.append(
+            json.loads(request.data)) or mock.MagicMock()
+        for push in pushes:
+            ntfy(push)
+    return sent
+
+
+def test_the_ntfy_boundary_replaces_the_live_notification_and_links_the_source():
+    """One event, one entry in the notification shade (SPEC story 6). ntfy links
+    messages into a sequence: publish again with the same `sequence_id` and the client
+    replaces the notification it already showed, rather than stacking a new one
+    (docs.ntfy.sh/publish "Updating notifications", server + Android >= 2.16). The
+    event tag is that id, so the trajectory updates in place.
+
+    The source post rides along as ntfy's `view` action -- one tap opens the Telegram
+    message the alert was read from (SPEC story 10).
+    """
+    when = datetime(2026, 8, 28, 2, 17)
+    tag = "drone-home-20260828T021714"
+    first, update = sent_payloads(
+        Push(when, "NEW", "URGENT", "БпЛА НАД ДОМОМ", "AerisRimor: Нивки", tag,
+             source="https://t.me/AerisRimor/12345"),
+        Push(when, "UPDATE", "URGENT", "БпЛА НАД ДОМОМ", "nebo_raketa: Нивки", tag))
+
+    assert first["sequence_id"] == tag and update["sequence_id"] == tag
+    assert first["actions"] == [{"action": "view", "label": "Джерело",
+                                 "url": "https://t.me/AerisRimor/12345"}]
+    assert "actions" not in update      # nothing to link: no source, no button

@@ -56,10 +56,17 @@ class Ntfy:
             "message": push.body,
             "priority": SILENT if push.kind == "UPDATE" else PRIORITY[push.tier],
             "tags": [TAGS[push.tier]],
+            # ntfy links messages into a sequence: publishing again with the same
+            # `sequence_id` replaces the notification the client already showed
+            # (docs.ntfy.sh/publish "Updating notifications"). The event tag is that
+            # id, so one event owns one entry in the shade instead of eighty.
+            # Needs ntfy server and Android app >= 2.16; older clients, and iOS
+            # (which is not on the supported list), stack the updates as before.
+            "sequence_id": push.tag,
         }
-        # ponytail: push.tag (the stable per-event id) is deliberately not sent. ntfy has
-        # no field for it -- `tags` renders as visible chips and an invented key risks a
-        # 400 -- so replace-in-place gets wired when its own ticket verifies a mechanism.
+        if push.source:
+            payload["actions"] = [{"action": "view", "label": "Джерело",
+                                   "url": push.source}]
         request = urllib.request.Request(
             self.url, data=json.dumps(payload).encode(),
             headers={"Content-Type": "application/json"} |
