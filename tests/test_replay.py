@@ -76,3 +76,9 @@ def test_19_aug_launches_on_other_cities_stay_below_the_notifier():
     ]
     non_kyiv = {"20:55:45", "20:57:11", "20:57:12", "20:57:15", "20:57:21"}
     assert [p for p in pushes if p[0] in non_kyiv] == []
+
+
+def test_resound_gap_is_configuration():
+    """Widening the resound gap collapses the repeat launch calls into the body."""
+    assert [p[1] for p in sounds("2026-08-27T00-00_00-30", resound_gap_min=10)] == [
+        "NEW", "PROMOTE", "NEW", "PROMOTE"]
