@@ -228,3 +228,78 @@ def test_30_aug_info_is_never_audible_and_typo_places_resolve():
         ("09:50:39", "UPDATE", "INFO", "БпЛА над Києвом"),
     ]
     assert [p for p in audible("2026-08-30T09-40_10-20") if p[2] == "INFO"] == []
+
+
+def test_28_aug_every_home_pass_of_the_worst_night_rings_the_phone():
+    """28 Aug 00:30-08:00, the corpus's worst night: a drone loops back over Нивки and
+    Антонов all night. Every pass BEHAVIOR.md counted (00:35, 02:17, 02:45, 02:54,
+    05:09, 05:41, 07:08, 07:55) rings, and nothing between them does -- the reports
+    inside one pass are body updates on the live notification.
+
+    05:09 is the WATCH-then-promotion case: AerisRimor (w=0.7) alone says
+    `2 реактива Оболонь - Нивки київ.` and that is a WATCH; nebo_raketa's bare `Нивки`
+    41 s later is the second source that makes it URGENT. 07:55 is reply-chain
+    progression: AerisRimor's lone `Антонов.` is a reply into the chain it has been
+    tracking the drone through, so 0.7 is enough on its own.
+
+    BEHAVIOR.md's ninth alarm of that day is `Нивки реактив!` at 15:28 -- outside this
+    slice. Eight passes fall in 00:30-08:00 and eight sound.
+    """
+    assert audible("2026-08-28T00-30_08-00") == [
+        ("00:35:53", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("00:55:22", "NEW", "WATCH", "БпЛА поруч"),
+        ("02:17:14", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("02:45:44", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("02:54:38", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("05:09:08", "NEW", "WATCH", "БпЛА поруч"),
+        ("05:09:37", "NEW", "WATCH", "БпЛА над домом — одне джерело"),
+        ("05:10:18", "PROMOTE", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("05:41:12", "NEW", "WATCH", "БпЛА поруч"),
+        ("05:41:58", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("06:17:12", "NEW", "WATCH", "БпЛА поруч"),
+        ("07:05:30", "NEW", "WATCH", "БпЛА поруч"),
+        ("07:08:12", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("07:51:24", "NEW", "WATCH", "БпЛА поруч"),
+        ("07:55:39", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
+    ]
+
+
+def test_28_aug_the_cooldown_changes_the_sounds_and_nothing_else():
+    """The lever the owner gets for "nine alarms in seven hours" (SPEC story 33) is the
+    per-tier cooldown, and it is the only thing that moves: same fixture, same rules,
+    a wider URGENT cooldown, and the phone rings four times instead of eight. The
+    notification count is identical -- the passes that no longer ring still update the
+    body in place, so the shade is as current either way.
+    """
+    quiet = audible("2026-08-28T00-30_08-00", cooldown_min={"URGENT": 60})
+    assert [p for p in quiet if p[2] == "URGENT"] == [
+        ("00:35:53", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("02:17:14", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("05:10:18", "PROMOTE", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("07:08:12", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
+    ]
+    assert (len(replay("2026-08-28T00-30_08-00", cooldown_min={"URGENT": 60}))
+            == len(replay("2026-08-28T00-30_08-00")))
+
+
+def test_30_aug_drones_over_other_regions_never_reach_the_phone():
+    """Reports whose only places are outside Kyiv and its oblast -- Чернігівщина,
+    Полтавщина, Дніпропетровщина -- are stored like every other message and pushed
+    nowhere, even while a drone is live over the home set (SPEC story 12)."""
+    other_regions = {"09:59:46", "10:08:36", "10:10:00", "10:17:29"}
+    assert [p for p in replay("2026-08-30T09-40_10-20")
+            if p[0] in other_regions] == []
+
+
+def test_faina_taun_resolves_to_the_home_set():
+    """SYNTHETIC fixture -- the corpus never says `файна таун`, so it cannot supply this
+    one. ЖК Файна Таун is where the household lives; ADR 6 makes it an alias of the home
+    set, and war_monitor's own `Київ: 🅿️ 1х реактив <place>` template carries it.
+    war_monitor is w=0.9, so one channel is enough to wake the house.
+
+    The other home alias, AerisRimor's misspelt `анонов`, is exercised on the real
+    30 Aug slice, where it is what promotes the home WATCH to URGENT at 09:46:05.
+    """
+    assert sounds("synthetic-home-alias-faina-taun") == [
+        ("04:00:00", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
+    ]

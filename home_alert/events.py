@@ -249,16 +249,19 @@ def replay(messages, config, sink, store=None):
             drone.report(message, parse.places, weights.get(message.channel, 0.0), chained)
 
             kind = "NEW" if fresh else "PROMOTE" if drone.tier != was else "UPDATE"
-            # the cooldown gates the sound, not the notification: a gated NEW still goes
-            # out, silently, so the body on the phone stays current (spec story 33)
-            # the cooldown is per zone, not global to the tier: a drone that has moved
-            # from the ring to over the house is new information at the same tier
+            # The cooldown gates the sound, not the notification: a gated NEW still goes
+            # out silently, so the body on the phone stays current (spec story 33). It is
+            # kept per zone rather than globally per tier -- a drone that has moved from
+            # the ring to over the house is new information at the same tier.
             last = sounded.get((zone, drone.tier))
             if kind != "UPDATE" and last and message.time - last < cooldown[drone.tier]:
                 kind = "UPDATE"
             if kind != "UPDATE":
                 sounded[(zone, drone.tier)] = message.time
             emit(kind, drone.tier, drone.title, drone.tag)
+            # ponytail: `done()` writes the ballistic event, not this one. Every message
+            # and every push is stored, so a night of drones replays from those two
+            # tables; a drone row of its own is worth adding when something queries it.
             done()
             continue
 
