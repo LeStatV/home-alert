@@ -46,8 +46,11 @@ URGENT_CONFIDENCE = 0.8                  # noisy-OR bar for waking the house
 SIREN_CHANNEL = "air_alert_ua"
 # `{0,2}` because the prose form is `м. Київ` -- a dot *and* a space -- while the
 # hashtag is `м_Київ`. `\b` so that a word merely ending in `м` before Київ (`...ським
-# Київська`) is not the city.
-SIREN_KYIV = re.compile(r"\bм[._ ]{0,2}київ", re.I)
+# Київська`) is not the city. The lookahead is the other half: `м. Київська область`
+# and `м Київський район` are the oblast, not м. Київ. It rejects a Cyrillic letter
+# rather than requiring a word boundary, because `_` and space must both still end the
+# name -- the channel writes compound tags like `#м_Харків_та_Харківська_...`.
+SIREN_KYIV = re.compile(r"\bм[._ ]{0,2}київ(?![а-яїієґ])", re.I)
 SIREN_ON = re.compile(r"повітряна тривога", re.I)
 SIREN_OFF = re.compile(r"відбій тривоги", re.I)
 SIREN_LABEL = {True: "🔴 тривога", False: "🟢 відбій", None: "⚪ сирена невідома"}
