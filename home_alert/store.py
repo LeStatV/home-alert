@@ -18,6 +18,8 @@ create table if not exists messages (
     primary key (channel, msg_id));
 create table if not exists events (
     tag text primary key, opened text, last text, tier text, title text,
+    -- NULL for a drone event: it has no launch to count, and a 0 would read as a
+    -- count of none (#22). Every event the household is notified about is here.
     launches integer, places text, sources text,
     -- the official siren in м. Київ when the event was last written: a signal, never
     -- a gate, kept so "URGENT without a siren" can be counted later (SPEC story 24)
@@ -49,7 +51,7 @@ class Store:
                 self.db.execute(
                     "insert or replace into events (tag, opened, last, tier, title, "
                     "launches, places, sources, siren) values (?,?,?,?,?,?,?,?,?)",
-                    (event.tag, event.opened.isoformat(), event.last_launch.isoformat(),
+                    (event.tag, event.opened.isoformat(), event.clock.isoformat(),
                      event.tier, event.title, event.launches,
                      json.dumps(event.places, ensure_ascii=False),
                      json.dumps(event.sources, ensure_ascii=False),
