@@ -548,7 +548,7 @@ def test_28_aug_the_body_carries_the_chain_its_sources_and_the_age_of_the_report
     assert home[:4] == ("05:10:18", "PROMOTE", "URGENT", "БпЛА НАД ДОМОМ")
     assert "Оболонь → Нивки" in home[4], home[4]
     assert "AerisRimor" in home[4] and "nebo_raketa" in home[4], home[4]
-    assert "звіт 05:10:18 (щойно)" in home[4], home[4]
+    assert "звіт 08:10:18 (щойно)" in home[4], home[4]
     assert re.search(r"\b[1-6]/6 каналів активні", home[4]), home[4]
 
     kyiv = [p for p in pushes if p[0] == "05:10:12"][0]
@@ -609,7 +609,7 @@ def test_the_all_clear_is_one_silent_info_after_ten_quiet_minutes_and_a_clear_ca
         ("02:12:00", "CLEAR", "INFO", "Відбій — БпЛА над домом"),
     ]
     # and the age of that last report is the point of it: twelve minutes of nothing
-    assert "звіт 02:00:00 (12 хв тому)" in pushes[1][4], pushes[1][4]
+    assert "звіт 05:00:00 (12 хв тому)" in pushes[1][4], pushes[1][4]
 
 
 def test_quiet_alone_is_never_an_all_clear():

@@ -8,11 +8,22 @@ The clock is the message timestamps, so `replay` and the live path run identical
 """
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from . import llm as enrichment, profiles, rules
 from .context import Context
 from .notify import SYSTEM_TOPIC, Push
+
+# Timestamps in this project are naive UTC end to end (`notify.now`); the household's
+# phone is the one place that clock is read by a person, so only there it is rendered
+# in Kyiv wall time. Storage, tags, logs and `replay` stay UTC (#20 owns the CLI call).
+KYIV_TZ = ZoneInfo("Europe/Kyiv")
+
+
+def wall(when):
+    """A naive-UTC datetime as Kyiv wall clock, for push bodies only."""
+    return when.replace(tzinfo=timezone.utc).astimezone(KYIV_TZ)
 
 # Fixed by the spec, not by the household -- only the resound gap is tunable.
 LAUNCH_WEIGHT_MIN = 0.6          # a launch on Kyiv from any channel this trusted is URGENT
@@ -275,7 +286,7 @@ class Pipeline:
         ago = ("щойно" if age < timedelta(minutes=1)
                else f"{int(age.total_seconds() // 60)} хв тому")
         return chain + [
-            f"джерела: {', '.join(sources)} · звіт {last:%H:%M:%S} ({ago})",
+            f"джерела: {', '.join(sources)} · звіт {wall(last):%H:%M:%S} ({ago})",
             f"{SIREN_LABEL[self.siren]} · {self.active(when)}/{len(self.channels)}"
             " каналів активні",
         ]
