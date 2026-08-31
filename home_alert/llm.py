@@ -8,18 +8,17 @@ could type, and never for a launch.
 
 ponytail: `TIMEOUT` is what the transport is *asked* for, not a deadline anything
 enforces. `urlopen` applies it per socket operation, so a provider dribbling a long
-answer a byte at a time blocks longer than 3 s; the Copilot SDK's `timeout=` is a
-guessed keyword and may be ignored outright, in which case a hung call hangs the
-handler with nothing but a WARNING to show for it. A real ceiling needs the call on
-its own thread (`asyncio.to_thread` + `wait_for`), which is the upgrade the day a
-provider is actually configured.
+answer a byte at a time blocks longer than 3 s, and a hung call hangs the handler with
+nothing but a WARNING to show for it. A real ceiling needs the call on its own thread
+(`asyncio.to_thread` + `wait_for`), which is the upgrade the day a provider is
+actually configured.
 """
 import dataclasses
-import importlib
 import json
 import logging
 import os
 import re
+import urllib.error
 import urllib.request
 from dataclasses import dataclass
 
@@ -36,7 +35,6 @@ DRAFT_TIMEOUT = 60.0     # `add-channel` is the offline path: no household is wa
 # recon flights, so letting the model say `recon` would let it *silence* a report --
 # and the one thing enrichment may never do is lower a verdict.
 TYPES = ("drone", "missile", "ballistic")
-COPILOT_SDK = "github_copilot_sdk"
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,7 +120,7 @@ DRAFT_SYSTEM = (
 
 
 class Client:
-    """One interface for both providers: `enrich` is the whole of it.
+    """One interface every provider answers to: `enrich` is the whole of it.
 
     Adapters implement `complete(prompt, timeout, system) -> str` and nothing else,
     so the fail-open, the prompts and the answer parsing are written once and are
@@ -189,42 +187,62 @@ class OpenAI(Client):
             return json.load(response)["choices"][0]["message"]["content"]
 
 
-class Copilot(Client):
-    """`github-copilot-sdk` behind the same contract (ADR 8).
+PROVIDERS = {"openai": OpenAI}
 
-    ponytail: the SDK is not installed here and its billing under AI Credits is
-    unverified (ARCHITECTURE.md open question), so this is the thinnest adapter that
-    can honestly exist -- one call, the same contract, and a loud failure at
-    construction if the package is missing. The day someone runs it for real, the
-    only thing that can be wrong is this one method's argument names -- `timeout=`
-    included, which is why nothing here treats it as a real deadline.
+
+PROBE = "ping"
+
+# What "this provider cannot be called at all" looks like. `TypeError` and
+# `AttributeError` are a wrong signature or a wrong module shape -- exactly the guess
+# that started #24; `KeyError`/`IndexError` are a response body that is not the shape
+# the adapter unpacks. The HTTP codes are the ones a household can only fix by editing
+# config or the environment: a bad key, a key without access, a wrong `base_url`, a
+# model the endpoint does not serve.
+UNCALLABLE = (TypeError, AttributeError, KeyError, IndexError)
+UNCALLABLE_STATUS = (400, 401, 403, 404)
+
+
+def probe(name, provider):
+    """One call at construction, so a selected-but-broken provider is loud here.
+
+    The asymmetry this fixes (#24): the enrichment path fail-opens by design, so a
+    wrong signature or a dead key used to cost one WARNING per message and otherwise
+    look exactly like `provider: none`. A household that had configured a provider
+    could not tell it from one that had not.
+
+    The split is between *cannot be called at all* -- which no amount of waiting
+    fixes and the owner must be told about at startup -- and *slow, rate-limited or
+    down*, which is a runtime condition the per-call fail-open handles and must keep
+    handling: an outage at OpenRouter may not be what stops the household's notifier
+    from starting (SPEC story 37). Costs one request per process start.
     """
-
-    def __init__(self, config):
-        try:
-            self.sdk = importlib.import_module(COPILOT_SDK)
-        except ImportError as error:
+    try:
+        provider.complete(PROBE, TIMEOUT)
+    except urllib.error.HTTPError as error:     # a subclass of URLError: catch first
+        if error.code in UNCALLABLE_STATUS:
             raise RuntimeError(
-                f"llm provider `copilot` needs the `{COPILOT_SDK.replace('_', '-')}` "
-                "package; install it or set llm.provider to `openai` or `none`"
-            ) from error
-        self.model = config["model"]
-        self.client = self.sdk.Client()
-
-    def complete(self, prompt, timeout, system=SYSTEM):
-        return self.client.complete(model=self.model, system=system, prompt=prompt,
-                                    timeout=timeout)
-
-
-PROVIDERS = {"openai": OpenAI, "copilot": Copilot}
+                f"llm provider {name!r} answered HTTP {error.code} on its first call: "
+                "check the key in the environment, `base_url` and `model`, or set "
+                "llm.provider to `none`") from error
+        log.warning("llm provider %r is up but unhappy (HTTP %s); "
+                    "enrichment will fail open", name, error.code)
+    except UNCALLABLE as error:
+        raise RuntimeError(
+            f"llm provider {name!r} could not be called: "
+            f"{type(error).__name__}: {error}") from error
+    except Exception as error:      # noqa: BLE001 -- slow, refused, down: not fatal
+        log.warning("llm provider %r did not answer at startup (%s); "
+                    "enrichment will fail open", name, type(error).__name__)
+    return provider
 
 
 def client(config):
     """The provider named by the one config line, or None when there is no LLM.
 
     `none` is the default and the state this project is designed to run in: GitHub
-    Models is retired and Copilot billing unverified, so the agent must be complete
-    without any of this (ARCHITECTURE.md).
+    Models is retired and the Copilot SDK turned out to be an agentic-session driver
+    rather than a completion API (ADR 8), so the agent must be complete without any
+    of this (ARCHITECTURE.md).
     """
     provider = (config or {}).get("provider") or "none"
     if provider == "none":
@@ -232,4 +250,4 @@ def client(config):
     if provider not in PROVIDERS:
         raise ValueError(f"llm.provider {provider!r} is not one of "
                          f"{('none', *PROVIDERS)}")
-    return PROVIDERS[provider](config)
+    return probe(provider, PROVIDERS[provider](config))
