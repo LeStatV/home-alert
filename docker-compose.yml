@@ -30,9 +30,9 @@ services:
     image: binwiederhier/ntfy:v2.17.0      # official server image (docs.ntfy.sh/install)
     command: serve
     restart: unless-stopped
-    # loopback only; put the host's Tailscale IP here (e.g. "100.x.y.z:80:80") to let
+    # loopback only; put the host's Tailscale IP here (e.g. "100.x.y.z:8000:80") to let
     # the phones reach it. Never 0.0.0.0 -- this is the household's alarm channel.
-    ports: ["127.0.0.1:80:80"]
+    ports: ["127.0.0.1:8000:80"]
     volumes:
       - ./ntfy/server.yml:/etc/ntfy/server.yml:ro
       - ntfy-lib:/var/lib/ntfy     # user database
