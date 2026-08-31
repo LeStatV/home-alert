@@ -345,3 +345,16 @@ def test_what_a_noise_pattern_would_silence_is_in_the_file_not_only_on_stdout(
     answer = json.dumps({"noise_patterns": ["."], "examples": []})
     text = run(tmp_path, monkeypatch, answer=answer).read_text(encoding="utf-8")
     assert "noise '.': silences 5/5 of them" in text.split("---")[0]
+
+
+def test_a_quiet_night_never_reaches_the_provider_at_all(tmp_path, monkeypatch):
+    """`review` runs nightly on a cron. A night with nothing unparsed in it has
+    nothing to ask, so it must not construct the provider -- which since #24 costs a
+    startup probe request, and raises when the key has expired. A broken provider may
+    not take down a run that would never have called it."""
+    monkeypatch.setattr(llm, "client", lambda config: (_ for _ in ()).throw(
+        RuntimeError("llm provider 'openai' answered HTTP 401 on its first call")))
+    sink = notify.Recorder()
+    review.review(config(tmp_path, "openai"), str(tmp_path / "empty.db"), sink=sink)
+    assert [push.body for push in sink.pushes] == [
+        "0 unparsed across 0 channels, 0 proposals written"]

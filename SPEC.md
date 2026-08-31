@@ -40,7 +40,7 @@ A single home-hosted agent reads a curated set of Telegram channels through a Te
 25. As the owner, I want every received message stored with its parse result, every event, and every notification sent, so that I can replay and audit any night.
 26. As the owner, I want to run `add-channel @handle`, have the last ~500 messages fetched, an LLM draft a profile (weight placeholder, threading flag, noise patterns, vocabulary, place aliases, ~30 labelled examples) and a rules coverage report printed, and then approve/edit and set the weight myself, so that adding a channel takes minutes and stays under my control.
 27. As the owner, I want a `review` command (nightly and on demand) that takes unclassified or low-confidence messages from the last 24 h and proposes profile diffs — never auto-applied — so that profiles improve over time without surprise behaviour changes.
-28. As the owner, I want the LLM provider to be one config line (OpenAI-compatible endpoint such as OpenRouter/Ollama/OpenAI, or the Copilot SDK adapter), so that I can switch when free tiers change or vanish.
+28. As the owner, I want the LLM provider to be one config line (OpenAI-compatible endpoint such as OpenRouter/Ollama/OpenAI), so that I can switch when free tiers change or vanish.
 29. As the owner, I want the LLM used on the live path only for messages the rules could not fully classify, with a 3-second timeout and fail-open to the rules verdict, so that an LLM outage or rate limit never delays or blocks an alert.
 30. As the owner, I want an unparsed message that names a HOME/NEARBY place to still produce a WATCH, so that a rule gap fails safe rather than silent.
 31. As the owner, I want the agent packaged as `docker compose` with `agent` and `ntfy` services, persistent volumes for the Telethon session and SQLite, and an interactive first start for the Telegram login, so that deployment on the home server is a single command.
@@ -89,7 +89,7 @@ The launch path is synchronous: Telethon update → rules → ntfy; no LLM, no c
 
 **Silence and contradictions.** No weight penalty for quiet channels; `last_post_age` per channel is tracked and shown as `N/5 каналів активні`; the `system` topic warns when all channels are silent while the Kyiv siren is on. `збили/чисто/зникли` never cancel an active URGENT by themselves.
 
-**LLM.** Provider behind one interface: OpenAI-compatible chat client (OpenRouter free tier: 20 rpm / 50 per day, 1000 per day after $10; Ollama; OpenAI) or a Copilot SDK adapter. Live path: only for `unknown`/low-confidence parses, 3 s timeout, result may raise tier or add places, never lower a rules verdict; failure → rules verdict stands. Offline: `add-channel` profile drafting and `review` diff proposals. Unofficial Copilot proxies are out.
+**LLM.** Provider behind one interface: OpenAI-compatible chat client (OpenRouter free tier: 20 rpm / 50 per day, 1000 per day after $10; Ollama; OpenAI). Live path: only for `unknown`/low-confidence parses, 3 s timeout, result may raise tier or add places, never lower a rules verdict; failure → rules verdict stands; a provider that cannot be called at all fails at startup instead (#24). Offline: `add-channel` profile drafting and `review` diff proposals. Unofficial Copilot proxies are out.
 
 **Profiles as data.** `profiles/<channel>.yaml`: `channel, weight, language, threads_by_reply, default_type (type assumed for bare place-name posts; kyiv_nebo: drone), quiet_hours (window exempt from silent-channel warnings; kyiv_nebo: 03:00–07:00 UTC), noise_patterns[], type_vocab{}, place_aliases{}, examples[]` where each example is `{text, type, stage, places, count}` and doubles as a test. `add-channel` writes a draft and a coverage report; a human edits and commits. `review` writes proposed diffs to a review file, never to the profile.
 
@@ -135,6 +135,6 @@ Prior art: the research prototype (`sim.py`, `timeline.py`) already replays JSON
 ## Further Notes
 
 - The corpus (18–30 Aug 2026, ~8.6k messages, five channels) includes four real ballistic events on Kyiv and a nightly jet-drone loop `Оболонь → Нивки → Вишневе`; it is the regression suite and should be committed as fixtures.
-- GitHub Models (free gpt-4o API) was retired 30 Jul 2026; Copilot SDK billing under AI Credits is unverified — a live test is a plan-phase task. Design assumes the LLM may be absent.
+- GitHub Models (free gpt-4o API) was retired 30 Jul 2026; the Copilot SDK turned out to be an agentic-session driver, not a completion API, and bills one premium request per prompt — adapter removed (#24, ADR 8). Design assumes the LLM may be absent.
 - Open decisions left to the owner, with defaults: drone URGENT cadence during a multi-hour raid (default: 5-min cooldown), personal vs dedicated Telegram account (default: dedicated). Channel weights, HOME/NEARBY sets and aliases are decided (see Data source and Geometry).
 - Ballistic and missile events on other cities are stored and visible in `replay`, useful later for widening HOME to other family locations.

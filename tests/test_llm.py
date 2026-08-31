@@ -1,14 +1,13 @@
-"""The LLM boundary: one interface, two adapters, and a merge that never lowers.
+"""The LLM boundary: one interface, one adapter, and a merge that never lowers.
 
-No network and no credentials here -- the transport is faked for both adapters, which
-is the whole point of the contract: switching provider is a config line (SPEC 28).
+No network and no credentials here -- the transport is faked, which is the whole point
+of the contract: switching provider is a config line (SPEC 28).
 """
 import contextlib
 import json
-import sys
 import time
+import urllib.error
 from datetime import datetime
-from unittest import mock
 
 import pytest
 import yaml
@@ -61,8 +60,8 @@ def test_no_answer_at_all_is_the_rules_verdict_untouched():
     assert llm.merge(parse, None) is parse
 
 
-# -- the contract both adapters answer to. The transport is faked for both: there are
-# no credentials on this machine and a test must never reach a network.
+# -- the contract every adapter answers to. The transport is faked: there are no
+# credentials on this machine and a test must never reach a network.
 
 CONFIG = {"provider": "openai", "base_url": "https://openrouter.ai/api/v1",
           "model": "meta-llama/llama-3.3-70b-instruct:free",
@@ -86,39 +85,22 @@ class FakeUrlopen:
         return contextlib.closing(io.BytesIO(json.dumps(body).encode()))
 
 
-class FakeSDK:
-    """The thinnest stand-in for `github-copilot-sdk`, which is not on this machine."""
+@pytest.fixture
+def adapter(monkeypatch):
+    """A client with its transport faked: `make(answer)` returns the client and the
+    list of calls its transport recorded.
 
-    def __init__(self, answer):
-        self.answer, self.calls = answer, []
-        sdk = self
-
-        class Client:
-            def complete(self, model=None, system=None, prompt=None, timeout=None):
-                sdk.calls.append({"prompt": prompt, "timeout": timeout,
-                                  "system": system, "model": model})
-                if isinstance(sdk.answer, Exception):
-                    raise sdk.answer
-                return sdk.answer
-
-        self.Client = Client
-
-
-@pytest.fixture(params=["openai", "copilot"])
-def adapter(request, monkeypatch):
-    """A client of one provider, with its transport faked: `make(answer)` returns the
-    client and the list of calls its transport recorded."""
-    provider = request.param
+    The startup probe (`llm.probe`) has already run and its call is cleared, so every
+    assertion below counts the calls the *household* caused, not the one construction
+    costs (#24).
+    """
 
     def make(answer):
-        config = CONFIG | {"provider": provider}
-        if provider == "openai":
-            fake = FakeUrlopen(answer)
-            monkeypatch.setattr(llm.urllib.request, "urlopen", fake)
-        else:
-            fake = FakeSDK(answer)
-            monkeypatch.setitem(sys.modules, llm.COPILOT_SDK, fake)
-        return llm.client(config), fake.calls
+        fake = FakeUrlopen(answer)
+        monkeypatch.setattr(llm.urllib.request, "urlopen", fake)
+        client = llm.client(CONFIG)
+        fake.calls.clear()
+        return client, fake.calls
 
     return make
 
@@ -177,12 +159,91 @@ def test_no_llm_is_the_default_and_constructs_nothing():
         llm.client({"provider": "gpt5-please"})
 
 
-def test_the_copilot_adapter_says_what_is_missing_instead_of_failing_at_call_time():
-    """`github-copilot-sdk` is not on this machine. Construction is where the owner
-    finds that out -- not the first message of a raid."""
-    with mock.patch.dict(sys.modules, {llm.COPILOT_SDK: None}):
-        with pytest.raises(RuntimeError, match="github-copilot-sdk"):
-            llm.client(CONFIG | {"provider": "copilot"})
+# -- a selected provider that cannot be called at all is loud at startup (#24). One
+# that is merely slow, rate-limited or down still fail-opens per call, as it must.
+
+
+class FakeProviderClass(llm.Client):
+    """A provider whose one call raises whatever the test named. Registered in
+    `PROVIDERS`, so it is `llm.client` and `llm.probe` under test, not a mock."""
+
+    error = None
+
+    def __init__(self, config):
+        self.calls = []
+
+    def complete(self, prompt, timeout, system=llm.SYSTEM):
+        self.calls.append(prompt)
+        if self.error:
+            raise self.error
+        return ANSWER
+
+
+@pytest.fixture
+def fake_provider(monkeypatch):
+    def register(error):
+        monkeypatch.setitem(llm.PROVIDERS, "fake",
+                            type("Fake", (FakeProviderClass,), {"error": error}))
+        return CONFIG | {"provider": "fake"}
+
+    return register
+
+
+def http(code):
+    return urllib.error.HTTPError("https://x", code, "", {}, None)
+
+
+@pytest.mark.parametrize("error", [
+    TypeError("complete() got an unexpected keyword argument 'system'"),
+    AttributeError("'module' object has no attribute 'Client'"),
+    KeyError("choices"),
+    IndexError("list index out of range"),
+    http(401),
+    http(403),
+    http(404),
+    http(400),
+])
+def test_a_provider_that_cannot_be_called_at_all_fails_at_startup(fake_provider, error):
+    """The asymmetry #24 is about: a wrong signature or a bad key used to be caught by
+    the per-call fail-open, so a household that had configured a provider ran exactly
+    as `provider: none` runs, with one WARNING a night to say so. Construction is
+    where the owner finds out now -- not the first message of a raid."""
+    with pytest.raises(RuntimeError, match="llm provider 'fake'"):
+        llm.client(fake_provider(error))
+
+
+@pytest.mark.parametrize("error", [
+    TimeoutError("timed out"),
+    urllib.error.URLError("connection refused"),
+    http(429),
+    http(500),
+    http(503),
+])
+def test_a_provider_that_is_merely_slow_or_down_still_constructs(fake_provider, error):
+    """The other half of the same criterion: a provider past its budget, over its rate
+    limit or having an outage is a runtime condition, and the household must not be
+    left without a notifier because a free tier is busy. It constructs, and every call
+    fail-opens exactly as before (SPEC story 37)."""
+    client = llm.client(fake_provider(error))
+    assert client.enrich(MESSAGE) is None
+
+
+def test_the_probe_is_one_call_and_never_reaches_the_household(fake_provider):
+    """Startup costs one request, and its answer is not a verdict about anything: the
+    probe asks whether the provider answers, not what it thinks."""
+    client = llm.client(fake_provider(None))
+    assert client.calls == [llm.PROBE]
+
+
+def test_the_copilot_provider_is_gone_and_says_so(monkeypatch):
+    """`github-copilot-sdk` is real and is GitHub's, but it is an async agentic-session
+    driver over a downloaded CLI runtime, not a completion API -- and it bills one
+    premium request per prompt (300/month on Pro, tighter than the OpenRouter free
+    tier this is gated for). Removed rather than left as a plausible dead option
+    (#24). An old config naming it gets the same error as any other unknown provider,
+    at startup."""
+    with pytest.raises(ValueError, match="copilot"):
+        llm.client(CONFIG | {"provider": "copilot"})
 
 
 def test_the_api_key_comes_from_the_named_env_var_and_never_from_the_config(monkeypatch):
@@ -193,9 +254,11 @@ def test_the_api_key_comes_from_the_named_env_var_and_never_from_the_config(monk
     monkeypatch.setattr(llm.urllib.request, "urlopen", fake)
     client = llm.client(CONFIG)
     client.enrich(MESSAGE)
-    request = fake.calls[0]["request"]
+    # calls[0] is the startup probe; calls[1] is the message the household caused
+    assert [call["prompt"] for call in fake.calls] == [llm.PROBE, client.prompt(MESSAGE)]
+    request = fake.calls[1]["request"]
     assert request.headers["Authorization"] == "Bearer sk-secret"
-    assert "sk-secret" not in fake.calls[0]["prompt"]
+    assert "sk-secret" not in fake.calls[1]["prompt"]
     assert "sk-secret" not in request.data.decode()
 
 
@@ -287,3 +350,37 @@ def test_a_canned_answer_raises_an_unparsed_message_to_the_drone_tier():
                          if "кружляє" in prompt else '{"type": null, "places": ["Оболонь"]}')
     assert run("synthetic-llm-types-an-unparsed-report", model) == [
         ("00:54:16", "NEW", "URGENT", "БпЛА НАД ДОМОМ")]
+
+
+# -- the other half of "loud at startup": who actually hears it. The agent runs under
+# `restart: unless-stopped`, so a raise alone is a crash loop nobody is told about.
+
+
+@pytest.mark.parametrize("error, clue", [
+    # the probe's own verdict: a key that expired since the last deploy
+    (RuntimeError("llm provider 'openai' answered HTTP 401 on its first call"), "401"),
+    # a config still naming the provider #24 removed -- the one stale config this
+    # change itself creates, and it does not raise `RuntimeError`
+    (ValueError("llm.provider 'copilot' is not one of ('none', 'openai')"), "copilot"),
+    # a stanza missing a key the adapter needs
+    (KeyError("base_url"), "base_url"),
+])
+def test_a_provider_that_stops_the_agent_is_pushed_before_the_process_dies(
+        monkeypatch, tmp_path, error, clue):
+    """A provider that cannot be constructed fails the start at 3am. Without this, the
+    household gets a restart loop and a docker log; with it, the owner's `system` topic
+    says so -- and the process still dies, so the exit code stays honest."""
+    from types import SimpleNamespace
+    from home_alert import cli, notify
+
+    recorder = notify.Recorder()
+    settings = yaml.safe_load((ROOT / "config.yaml").read_text())
+    settings["profiles"] = ROOT / "profiles"
+    monkeypatch.setattr(cli, "sink_for", lambda config, ntfy: recorder)
+    monkeypatch.setattr(llm, "client", lambda config: (_ for _ in ()).throw(error))
+
+    with pytest.raises(type(error)):
+        cli.run(SimpleNamespace(db=str(tmp_path / "x.db")), settings)
+
+    assert [(push.topic, push.title, clue in push.body) for push in recorder.pushes] \
+        == [(notify.SYSTEM_TOPIC, "Агент не стартував", True)]

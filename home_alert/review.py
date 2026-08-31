@@ -352,7 +352,10 @@ def review(config, db, since="24h", sink=None):
                 "applied. Read it, apply the hunks you agree with, and move or "
                 "delete it before reviewing this night again.")
 
-        client = llm.client(config.get("llm"))
+        # only when there is something to ask about: a quiet night must not spend a
+        # startup probe (#24) on nothing, nor die on a broken provider it would never
+        # have called.
+        client = llm.client(config.get("llm")) if collected else None
         if client is None and collected:
             print("\nno LLM provider configured (llm.provider: none) -- the report "
                   "above is the whole run.\nSet `llm.provider` to have the unparsed "
