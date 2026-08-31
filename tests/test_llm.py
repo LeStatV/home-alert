@@ -350,3 +350,37 @@ def test_a_canned_answer_raises_an_unparsed_message_to_the_drone_tier():
                          if "кружляє" in prompt else '{"type": null, "places": ["Оболонь"]}')
     assert run("synthetic-llm-types-an-unparsed-report", model) == [
         ("00:54:16", "NEW", "URGENT", "БпЛА НАД ДОМОМ")]
+
+
+# -- the other half of "loud at startup": who actually hears it. The agent runs under
+# `restart: unless-stopped`, so a raise alone is a crash loop nobody is told about.
+
+
+@pytest.mark.parametrize("error, clue", [
+    # the probe's own verdict: a key that expired since the last deploy
+    (RuntimeError("llm provider 'openai' answered HTTP 401 on its first call"), "401"),
+    # a config still naming the provider #24 removed -- the one stale config this
+    # change itself creates, and it does not raise `RuntimeError`
+    (ValueError("llm.provider 'copilot' is not one of ('none', 'openai')"), "copilot"),
+    # a stanza missing a key the adapter needs
+    (KeyError("base_url"), "base_url"),
+])
+def test_a_provider_that_stops_the_agent_is_pushed_before_the_process_dies(
+        monkeypatch, tmp_path, error, clue):
+    """A provider that cannot be constructed fails the start at 3am. Without this, the
+    household gets a restart loop and a docker log; with it, the owner's `system` topic
+    says so -- and the process still dies, so the exit code stays honest."""
+    from types import SimpleNamespace
+    from home_alert import cli, notify
+
+    recorder = notify.Recorder()
+    settings = yaml.safe_load((ROOT / "config.yaml").read_text())
+    settings["profiles"] = ROOT / "profiles"
+    monkeypatch.setattr(cli, "sink_for", lambda config, ntfy: recorder)
+    monkeypatch.setattr(llm, "client", lambda config: (_ for _ in ()).throw(error))
+
+    with pytest.raises(type(error)):
+        cli.run(SimpleNamespace(db=str(tmp_path / "x.db")), settings)
+
+    assert [(push.topic, push.title, clue in push.body) for push in recorder.pushes] \
+        == [(notify.SYSTEM_TOPIC, "Агент не стартував", True)]

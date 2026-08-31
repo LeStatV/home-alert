@@ -54,7 +54,25 @@ def run(args, config):
     # the siren feed has no profile and no weight -- it is read for one bit -- so it is
     # not in the profiles directory and has to be added to the follow list by hand.
     channels = sorted(profiles.load(config["profiles"])) + [events.SIREN_CHANNEL]
-    pipeline = events.Pipeline(config, sink, store.Store(args.db or config["db"]))
+    try:
+        pipeline = events.Pipeline(config, sink, store.Store(args.db or config["db"]))
+    except Exception as error:      # noqa: BLE001 -- re-raised; see below
+        # An LLM provider that cannot be called at all stops the agent here (#24) --
+        # correct, but under `restart: unless-stopped` a provider that broke since the
+        # last deploy (expired key, retired model) is a silent crash loop, and the
+        # household would find out during a raid. The push is best-effort: `Ntfy`
+        # already swallows an unreachable server, which is what a compose cycle
+        # restarting ntfy alongside the agent looks like. The raise stands, so the
+        # exit code and the logs stay honest.
+        #
+        # Every construction failure, not just the probe's `RuntimeError`: a config
+        # left saying `provider: copilot` after #24 raises `ValueError`, a stanza
+        # missing `base_url` raises `KeyError`, and an unwritable db raises from
+        # `Store`. All of them are "the agent did not start" and all of them are
+        # equally silent under a restart policy. Nothing is swallowed -- the only
+        # cost of the wide catch is one push on the way out.
+        notify.system(sink, "Агент не стартував", str(error))
+        raise
     client = TelegramClient(config["telegram"]["session"],
                             int(os.environ["TG_API_ID"]), os.environ["TG_API_HASH"])
 
