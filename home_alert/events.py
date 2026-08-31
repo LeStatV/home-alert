@@ -104,6 +104,12 @@ class Event:
         return f"{self.type[:3]}-{self.opened:%Y%m%dT%H%M%S}"
 
     @property
+    def clock(self):
+        """The `events.last` column: for a wave that is the last *launch*, the clock
+        the close runs on -- not the last report, which trajectory calls also move."""
+        return self.last_launch
+
+    @property
     def count(self):
         """`>=N`: the largest figure any one channel gave, never the sum of them. Five
         channels each counting the same six missiles is six missiles (story 23)."""
@@ -132,6 +138,11 @@ class Drone:
     count: int = 0            # largest figure any one channel gave, never their sum
     echo: tuple = None        # (time, places, channel) of the last report folded in
 
+    # A drone event has no launch concept: nothing launches, so there is nothing to
+    # count and no launch clock. `events.launches` is NULL for these rows, never 0 --
+    # a 0 would read as "we counted, and it was none". Not a field: nothing sets it.
+    launches = None
+
     @property
     def tier(self):
         """HOME wakes the house only once the reports are worth waking it for.
@@ -158,6 +169,12 @@ class Drone:
     @property
     def tag(self):
         return f"drone-{self.zone.lower()}-{self.opened:%Y%m%dT%H%M%S}"
+
+    @property
+    def clock(self):
+        """The `events.last` column: any report keeps a zone alive, so the last one is
+        both the age the body shows and the clock the event closes on."""
+        return self.last
 
     @property
     def sources(self):
@@ -546,11 +563,7 @@ class Pipeline:
             if kind != "UPDATE":
                 self.sounded[(zone, drone.tier)] = message.time
             emit(kind, drone.tier, drone.title, drone.tag, drone.count, drone)
-            # ponytail: drone events have no row of their own yet, so record no event
-            # rather than the unrelated live ballistic one -- a notifications-to-events
-            # join would otherwise credit these pushes to it. Every message and every
-            # push is stored, so a night of drones still replays from those two tables.
-            done()
+            done(drone)
             return
 
         done()

@@ -672,13 +672,63 @@ def test_the_siren_state_is_stored_on_the_event(tmp_path):
     """Not just shown: kept, so the household can later ask how often an URGENT beat
     the siren (SPEC story 24). The events table is where the answer will come from.
     Read here at the store because that is the boundary the criterion names."""
+    saved = stored("synthetic-siren-signal", tmp_path)
+    assert saved.db.execute(
+        "select title, siren from events order by opened").fetchall() == [
+        ("БпЛА НАД ДОМОМ", "off"),        # its last report came after the all-clear
+        ("БАЛІСТИКА на Київ", "on")]
+
+
+def stored(fixture, tmp_path):
+    """Replay a fixture into a `Store` and hand it back, for the two questions only the
+    database can answer: what an event row says, and what a push joins to."""
     saved = store.Store(str(tmp_path / "home-alert.db"))
     config = yaml.safe_load((ROOT / "config.yaml").read_text())
     config["profiles"] = ROOT / "profiles"
-    events.replay(reader.read_corpus(FIXTURES / "synthetic-siren-signal.jsonl"),
+    events.replay(reader.read_corpus(FIXTURES / f"{fixture}.jsonl"),
                   config, notify.Recorder(), saved)
-    assert saved.db.execute("select title, siren from events").fetchall() == [
-        ("БАЛІСТИКА на Київ", "on")]
+    return saved
+
+
+def test_a_drone_event_is_stored_like_any_other_minus_the_launches_it_never_had(tmp_path):
+    """A drone event writes its own row, so the siren state at the time it woke the
+    house is kept (#22). It has no launch concept -- no launch clock, nothing to count
+    -- so those two columns are NULL rather than a zero that would read as a fact.
+    """
+    saved = stored("synthetic-siren-signal", tmp_path)
+    assert saved.db.execute(
+        "select tag, opened, last, tier, launches, places, sources from events "
+        "where tag like 'drone-%'").fetchall() == [
+        ("drone-home-20260828T040030", "2026-08-28T04:00:30", "2026-08-28T04:05:00",
+         "URGENT", None, '["Київ", "Нивки"]', '["war_monitor"]')]
+
+
+def test_urgent_without_a_siren_is_countable_for_drones_too(tmp_path):
+    """SPEC story 24's question, asked of the database: which URGENTs woke the house
+    with no official siren? Until #22 the answer could only ever be a ballistic or a
+    missile one -- the threat types that wake it least.
+
+    Every push joins to the event that produced it and to no other, which is what the
+    tag is for: three URGENT pushes, three joined rows, no push credited twice and none
+    credited to a neighbouring event.
+    """
+    saved = stored("synthetic-siren-signal", tmp_path)
+    joined = saved.db.execute(
+        "select n.title, e.tier, e.siren from notifications n "
+        "join events e on e.tag = n.tag order by n.time").fetchall()
+    assert joined == [
+        ("БпЛА НАД ДОМОМ", "URGENT", "off"),
+        ("БАЛІСТИКА на Київ", "URGENT", "on"),
+        ("БпЛА НАД ДОМОМ", "URGENT", "off")]
+    assert len(joined) == saved.db.execute(
+        "select count(*) from notifications").fetchone()[0]
+
+    assert saved.db.execute(
+        "select n.time, n.title from notifications n join events e on e.tag = n.tag "
+        "where n.tier = 'URGENT' and (e.siren is null or e.siren = 'off') "
+        "order by n.time").fetchall() == [
+        ("2026-08-28T04:00:30", "БпЛА НАД ДОМОМ"),
+        ("2026-08-28T04:05:00", "БпЛА НАД ДОМОМ")]
 
 
 def test_replay_over_the_live_database_reproduces_the_recorded_pushes(tmp_path, capsys,
