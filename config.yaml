@@ -41,7 +41,7 @@ ballistic:
 llm:
   provider: none          # none | openai
   base_url: https://openrouter.ai/api/v1   # any OpenAI-compatible endpoint: OpenRouter,
-  model: meta-llama/llama-3.3-70b-instruct:free   # Ollama (http://localhost:11434/v1), OpenAI
+  model: minimax/minimax-m3:free    # Ollama (http://localhost:11434/v1), OpenAI; llama-3.3-70b:free was retired by OpenRouter -- the startup probe caught it live (#24)
   api_key_env: OPENROUTER_API_KEY
 
 system:
