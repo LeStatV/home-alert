@@ -38,13 +38,36 @@ PARTIAL = 0.5                            # ...counts half. It is not a second pa
 URGENT_CONFIDENCE = 0.8                  # noisy-OR bar for waking the house
 
 # -- the official siren feed. Read for one bit and never as a gate (ADR 17): is the
-# siren sounding in м. Київ? @air_alert_ua posts one region per message, a hashtag and
-# a state; the oblast (`#Київська_область`) is a different siren and not ours.
+# siren sounding in м. Київ? @air_alert_ua posts one region per message, naming it
+# twice -- in prose (`Повітряна тривога в м. Київ`) and as a trailing `#м_Київ`. The
+# rest of the oblast is posted per raion (`#Вишгородський_район`, `#Бучанський_район`,
+# never `#Київська_область`): a different siren, and not ours. Verified against 3580
+# real posts in #23; `tests/test_siren.py` holds the labelled sample.
 SIREN_CHANNEL = "air_alert_ua"
-SIREN_KYIV = re.compile(r"м[._ ]?київ", re.I)
+# `{0,2}` because the prose form is `м. Київ` -- a dot *and* a space -- while the
+# hashtag is `м_Київ`. `\b` so that a word merely ending in `м` before Київ (`...ським
+# Київська`) is not the city.
+SIREN_KYIV = re.compile(r"\bм[._ ]{0,2}київ", re.I)
 SIREN_ON = re.compile(r"повітряна тривога", re.I)
 SIREN_OFF = re.compile(r"відбій тривоги", re.I)
 SIREN_LABEL = {True: "🔴 тривога", False: "🟢 відбій", None: "⚪ сирена невідома"}
+
+
+def siren_verdict(text):
+    """What one @air_alert_ua post says about the siren in м. Київ.
+
+    `"on"` and `"off"` are the only two that move anything; `"not-kyiv"` is somebody
+    else's siren and `"not-siren"` is one of the channel's many non-alert posts (a КАБ
+    advisory, an evacuation notice, a `тривога ще триває у:` reminder). Named verdicts
+    rather than a bare bool so a test can tell the two no-ops apart.
+    """
+    text = " ".join(text.split())
+    on, off = SIREN_ON.search(text), SIREN_OFF.search(text)
+    if not on and not off:
+        return "not-siren"
+    if not SIREN_KYIV.search(text):
+        return "not-kyiv"
+    return "on" if on else "off"
 
 # A channel that has posted this recently is one of the `N/6 каналів активні` the body
 # shows; the number is the household's own measure of how much to trust a lone report.
@@ -345,15 +368,15 @@ class Pipeline:
         if message.channel == SIREN_CHANNEL:
             # The one channel with no profile and no weight. It classifies nothing and
             # scores nothing; it flips one bit that every push then shows.
-            if SIREN_KYIV.search(text):
-                if SIREN_ON.search(text):
-                    if not self.siren:      # a new siren, a new chance to warn
-                        self.warned = False
-                    self.siren = True
-                elif SIREN_OFF.search(text):
-                    if self.siren:
-                        self.siren_off = message.time
-                    self.siren = False
+            verdict = siren_verdict(text)
+            if verdict == "on":
+                if not self.siren:          # a new siren, a new chance to warn
+                    self.warned = False
+                self.siren = True
+            elif verdict == "off":
+                if self.siren:
+                    self.siren_off = message.time
+                self.siren = False
             pushes = self.stand_down(message.time) + self.coverage(message.time)
             if self.store:
                 self.store.record(message, rules.classify(text), None, pushes)
