@@ -1,6 +1,6 @@
 channel: AerisRimor
 title: "AerisRimor"
-weight: 0.7
+weight: 0.8              # 0.7 until 1 Sep 2026: jets circled HOME with only this channel naming Нивки/Антонов -- owner raised it to ring alone (#30)
 language: uk
 threads_by_reply: true   # 34% of posts are replies; terse bursts inside a chain
 

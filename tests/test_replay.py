@@ -265,11 +265,12 @@ def test_28_aug_every_home_pass_of_the_worst_night_rings_the_phone():
     it the channel's 3-min type memory has expired by the time it posts the untyped
     `Київ / 2х Нивки Новобіличі, Пріорка` and the pass goes unreported.
 
-    05:09 is the WATCH-then-promotion case: AerisRimor (w=0.7) alone says
-    `2 реактива Оболонь - Нивки київ.` and that is a WATCH; nebo_raketa's bare `Нивки`
-    41 s later is the second source that makes it URGENT. 07:55 is reply-chain
-    progression: AerisRimor's lone `Антонов.` is a reply into the chain it has been
-    tracking the drone through, so 0.7 is enough on its own.
+    05:09 rings on the first report: AerisRimor's `2 реактива Оболонь - Нивки київ.`
+    clears the bar alone since its weight rose to 0.8 (1 Sep, #30) -- until then this
+    was the WATCH-then-promotion case, with nebo_raketa's bare `Нивки` 41 s later as
+    the waking second source; that confirmation is now a silent update. 07:55 is
+    reply-chain progression: AerisRimor's lone `Антонов.` is a reply into the chain it
+    has been tracking the drone through, which cleared the bar even at 0.7.
 
     Nine passes, nine sounds -- the night BEHAVIOR.md describes as "9 alarms between
     00:35 and 07:55".
@@ -298,8 +299,7 @@ def test_28_aug_every_home_pass_of_the_worst_night_rings_the_phone():
         ("02:54:38", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
         ("03:21:34", "NEW", "WATCH", "БпЛА поруч"),
         ("05:09:08", "NEW", "WATCH", "БпЛА поруч"),
-        ("05:09:37", "NEW", "WATCH", "БпЛА над домом — одне джерело"),
-        ("05:10:18", "PROMOTE", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("05:09:37", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
         ("05:41:12", "NEW", "WATCH", "БпЛА поруч"),
         ("05:41:58", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
         ("06:17:12", "NEW", "WATCH", "БпЛА поруч"),
@@ -323,7 +323,7 @@ def test_28_aug_the_cooldown_changes_the_sounds_and_nothing_else():
     assert [p for p in quiet if p[2] == "URGENT"] == [
         ("00:35:53", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
         ("02:17:14", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
-        ("05:10:18", "PROMOTE", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("05:09:37", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
         ("06:31:29", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
         ("07:55:39", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
     ]
@@ -356,15 +356,18 @@ def test_faina_taun_resolves_to_the_home_set():
 
 def test_an_aggregator_echo_is_half_a_source_and_a_fresh_report_is_whole():
     """SYNTHETIC fixture -- the corpus never lands an echo where it would change a tier,
-    so it cannot supply this one. Wording is verbatim (AerisRimor's `2 реактива Оболонь -
-    Нивки київ.` of 28 Aug 05:09:37, kyiv_nebo's bare `Нивки`, Ukrainian_Intelligence's
-    `Київ - реактивний на <place> ⚠️` template) with the home place substituted in.
+    so it cannot supply this one. Wording is corpus wording (kyiv_nebo's bare places,
+    Ukrainian_Intelligence's `Київ - реактивний на <place> ⚠️` template) with the home
+    place substituted in. AerisRimor left the cast when the owner raised it to 0.8
+    (1 Sep, #30): at 0.8 any of its home reports rings alone, which is a different test.
 
-    AerisRimor (w=0.7) alone is a WATCH. kyiv_nebo (w=0.6) ten seconds later adds no
-    place AerisRimor had not already named -- the aggregator echo `channel-eval-kyiv_nebo`
-    measured -- so it counts half and the house stays asleep (0.79). Ukrainian_Intelligence
-    at the same w=0.6, fifty seconds later and outside the echo window, is a real second
-    pair of eyes and wakes it. Same weight, same place: only the fifteen seconds differ.
+    Ukrainian_Intelligence (w=0.6) alone is a WATCH. kyiv_nebo's bare `Нивки` ten
+    seconds later adds no place the template had not already named -- the aggregator
+    echo `channel-eval-kyiv_nebo` measured -- so it counts half and the house stays
+    asleep (0.72). The same kyiv_nebo, fifty seconds later, outside the echo window and
+    with a place of its own (`Нивки, Оболонь`), is a real second pair of eyes and wakes
+    it: `report` keeps the max, so its half upgrades to the whole 0.6 and the noisy-OR
+    reaches 0.84. Same channel, same weight, same place: only the seconds differ.
     """
     assert sounds("synthetic-echo-is-half-a-source") == [
         ("03:30:00", "NEW", "WATCH", "БпЛА над домом — одне джерело"),
@@ -545,7 +548,7 @@ def test_28_aug_the_body_carries_the_chain_its_sources_and_the_age_of_the_report
     """
     pushes = bodies("2026-08-28T00-30_08-00")
     home = [p for p in pushes if p[0] == "05:10:18"][0]
-    assert home[:4] == ("05:10:18", "PROMOTE", "URGENT", "БпЛА НАД ДОМОМ")
+    assert home[:4] == ("05:10:18", "UPDATE", "URGENT", "БпЛА НАД ДОМОМ")
     assert "Оболонь → Нивки" in home[4], home[4]
     assert "AerisRimor" in home[4] and "nebo_raketa" in home[4], home[4]
     assert "звіт 08:10:18 (щойно)" in home[4], home[4]
@@ -809,13 +812,15 @@ def test_an_untyped_report_is_capped_at_watch_and_still_lets_two_sources_wake_th
     And it must not cost the household the wake-up it would have had: AerisRimor names
     only a place the untyped report already named, which for two real sources is the
     aggregator echo that counts half. A weightless report is not a source to be echoed,
-    so AerisRimor is whole (0.7), kyiv_nebo's `Нивки` twenty seconds later is the second
-    pair of eyes (0.6), and the noisy-OR reaches 0.88.
+    so AerisRimor is whole -- and whole is 0.8 since 1 Sep (#30), so it wakes the house
+    by itself at 02:00:08. Were the exemption broken, its half (0.4) could never clear
+    the bar and kyiv_nebo's 0.6 on top (0.76) would not either: the promotion is the
+    exemption's proof. kyiv_nebo's `Нивки` is now a silent confirmation (0.92).
     """
     assert replay("synthetic-untyped-report-is-capped-at-watch") == [
         ("02:00:00", "NEW", "WATCH", "БпЛА над домом — одне джерело"),
-        ("02:00:08", "UPDATE", "WATCH", "БпЛА над домом — одне джерело"),
-        ("02:00:20", "PROMOTE", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("02:00:08", "PROMOTE", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("02:00:20", "UPDATE", "URGENT", "БпЛА НАД ДОМОМ"),
     ]
 
 
