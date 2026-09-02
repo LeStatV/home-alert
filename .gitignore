@@ -17,7 +17,11 @@ research/samples-*/sim_*.txt
 __pycache__/
 *.pyc
 .venv/
+
+# per-deployment wiring: copy the committed *.example.* files and edit the copies
+config.yaml
 config.local.yaml
+docker-compose.yml
 
 # macOS
 .DS_Store

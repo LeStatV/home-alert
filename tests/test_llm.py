@@ -288,7 +288,7 @@ class FakeProvider(llm.Client):
 
 def run(fixture, provider=None, log=None):
     """The fixture through the pipeline with this provider; the push tuples out."""
-    config = yaml.safe_load((ROOT / "config.yaml").read_text())
+    config = yaml.safe_load((ROOT / "config.example.yaml").read_text())
     config["profiles"] = ROOT / "profiles"
     pushes = []
 
@@ -374,7 +374,7 @@ def test_a_provider_that_stops_the_agent_is_pushed_before_the_process_dies(
     from home_alert import cli, notify
 
     recorder = notify.Recorder()
-    settings = yaml.safe_load((ROOT / "config.yaml").read_text())
+    settings = yaml.safe_load((ROOT / "config.example.yaml").read_text())
     settings["profiles"] = ROOT / "profiles"
     monkeypatch.setattr(cli, "sink_for", lambda config, ntfy: recorder)
     monkeypatch.setattr(llm, "client", lambda config: (_ for _ in ()).throw(error))

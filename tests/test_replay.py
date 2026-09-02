@@ -726,7 +726,7 @@ def stored(fixture, tmp_path):
     """Replay a fixture into a `Store` and hand it back, for the two questions only the
     database can answer: what an event row says, and what a push joins to."""
     saved = store.Store(str(tmp_path / "home-alert.db"))
-    config = yaml.safe_load((ROOT / "config.yaml").read_text())
+    config = yaml.safe_load((ROOT / "config.example.yaml").read_text())
     config["profiles"] = ROOT / "profiles"
     events.replay(reader.read_corpus(FIXTURES / f"{fixture}.jsonl"),
                   config, notify.Recorder(), saved)
@@ -785,7 +785,7 @@ def test_replay_over_the_live_database_reproduces_the_recorded_pushes(tmp_path, 
     criterion's own boundary.
     """
     db = str(tmp_path / "home-alert.db")
-    config = yaml.safe_load((ROOT / "config.yaml").read_text())
+    config = yaml.safe_load((ROOT / "config.example.yaml").read_text())
     config["profiles"] = ROOT / "profiles"
 
     live = store.Store(db)          # pass 1: a night, as `run` would have written it

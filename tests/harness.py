@@ -32,7 +32,7 @@ def bodies(fixture, cooldown_min=None, **overrides):
 
 def sent(fixture, cooldown_min=None, **overrides):
     """The raw `Push` objects, for the fields the tuples drop -- topic and source."""
-    config = yaml.safe_load((ROOT / "config.yaml").read_text())
+    config = yaml.safe_load((ROOT / "config.example.yaml").read_text())
     config["profiles"] = ROOT / "profiles"
     config["ballistic"].update(overrides)
     config["drone"]["cooldown_min"].update(cooldown_min or {})
