@@ -102,18 +102,20 @@ def test_22_aug_past_tense_and_promotion_post_never_sound():
     assert [p for p in replay("2026-08-22T08-36_08-50") if p[0] == "08:47:46"] == []
 
 
-def test_19_aug_ballistic_wave_is_eight_sounds_in_twenty_six_minutes():
+def test_19_aug_ballistic_wave_is_six_sounds_in_twenty_six_minutes():
     """19 Aug 20:50-21:16, the corpus's heaviest raid: URGENT at 20:52:25, the first
     launch message any channel posted. AerisRimor's `ЦІЛЬ` -> `КИЇВ` -> `Балістика` ->
     `На Бровари!!` burst three seconds later resolves into that same event -- never a
-    WATCH of its own -- and the seven waves that follow re-sound at most once every two
-    minutes. Eight audible ballistic pushes in 26 minutes, the number BEHAVIOR.md
-    measured, and the Zircon wave alongside them is three more on its own event.
+    WATCH of its own -- and the waves that follow re-sound at most once every two
+    minutes. BEHAVIOR.md measured eight audible ballistic pushes here; six of them are
+    left, and the Zircon wave alongside them is three more on its own event -- nine
+    audible pushes in the window, and the SPEC criterion is per event (#16).
 
-    The third ballistic sound moved from 20:58:01 to 20:57:58, kpszsu's `Балістичні
-    ракети на Сумщині, Чернігівщині та Полтавщині курсом на Київ.`: Kyiv-gating is now
-    on the target, so the oblasts a wave crosses no longer suppress a call that says
-    Kyiv is the target. The official channel gets three seconds it used to lose.
+    The two that went are 20:57:58 and 21:03:16: both came 18 s and 6 s after the Zircon
+    event had already bypassed Do-Not-Disturb, and the household hears one sound per
+    raid-minute, not one per live event. Both are still body updates on the live
+    notification, and kpszsu's `Балістичні ракети ... курсом на Київ.` at 20:57:58 keeps
+    the three seconds target-gating won it -- it just lands silently now.
 
     The threat declaration at 20:52:17 is INFO: priority 2, silent by spec, not a sound.
     """
@@ -121,16 +123,46 @@ def test_19_aug_ballistic_wave_is_eight_sounds_in_twenty_six_minutes():
             if p[3] == "БАЛІСТИКА на Київ"] == [
         ("20:52:25", "NEW", "URGENT", "БАЛІСТИКА на Київ"),
         ("20:54:40", "RESOUND", "URGENT", "БАЛІСТИКА на Київ"),
-        ("20:57:58", "RESOUND", "URGENT", "БАЛІСТИКА на Київ"),
         ("21:00:40", "RESOUND", "URGENT", "БАЛІСТИКА на Київ"),
-        ("21:03:16", "RESOUND", "URGENT", "БАЛІСТИКА на Київ"),
         ("21:05:40", "RESOUND", "URGENT", "БАЛІСТИКА на Київ"),
         ("21:09:38", "RESOUND", "URGENT", "БАЛІСТИКА на Київ"),
         ("21:11:45", "RESOUND", "URGENT", "БАЛІСТИКА на Київ"),
     ]
+    assert len(audible("2026-08-19T20-50_21-16")) == 9
     assert [p for p in replay("2026-08-19T20-50_21-16")
             if p[3] == "Загроза балістики"] == [
         ("20:52:17", "NEW", "INFO", "Загроза балістики")]
+
+
+def test_19_aug_one_raid_never_rings_twice_within_the_floor():
+    """Two events, one raid, one household: on 19 Aug the Zircon promotion at 20:57:40
+    and the ballistic repeat 18 s behind it were two Do-Not-Disturb bypasses for the same
+    minute, because each event kept its own resound clock (#16). The floor is global and
+    only stops repeats -- a promotion or a new event is news and rings regardless -- so
+    the pattern is: the missile rings, the ballistic repeat lands in the body, and the
+    ballistic event rings again at 21:00:40 once the floor has passed. 21:03:16 is the
+    same shape six seconds after the Zircons re-sounded.
+    """
+    pushes = replay("2026-08-19T20-50_21-16")
+    assert [p for p in pushes if p[0] in ("20:57:58", "21:00:40", "21:03:16")] == [
+        ("20:57:58", "UPDATE", "URGENT", "БАЛІСТИКА на Київ"),
+        ("21:00:40", "RESOUND", "URGENT", "БАЛІСТИКА на Київ"),
+        ("21:03:16", "UPDATE", "URGENT", "БАЛІСТИКА на Київ"),
+    ]
+
+
+def test_a_weightless_report_does_not_hold_a_zone_alive():
+    """SYNTHETIC fixture -- the corpus's untyped reports never sit alone in the gap that
+    would show this. A report nothing could type joins its zone weightless (story 30) and
+    now leaves the event's clock where it was (#16): eight minutes after the last report
+    anything could type, the next real one opens a fresh event and rings. Holding the
+    event open instead is what cost the 29 Aug raid three audible WATCHes.
+    """
+    assert replay("synthetic-weightless-report-does-not-hold-the-event") == [
+        ("02:00:00", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("02:06:00", "UPDATE", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("02:13:00", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
+    ]
 
 
 def test_19_aug_launches_on_other_cities_stay_below_the_notifier():
@@ -230,14 +262,22 @@ def test_30_aug_the_ring_warns_before_home_wakes_the_house():
     w=0.6 -- not enough to wake the house -- so that is a WATCH; AerisRimor's
     `Підвернув на анонов!` four seconds later is a second, independent pair of eyes
     (it names Антонов, which kyiv_nebo did not, so it is no echo) and the noisy-OR
-    clears 0.8. One URGENT for a drone that circles overhead for the next 22 minutes;
-    everything after is a body update on the same notification.
+    clears 0.8. 09:55:45 is a re-entry (#16): the drone went out to Шулявка and Вишневе
+    and is over Нивки again, and a return is news the same way a count jump is. The 5-min
+    URGENT cooldown gates it like any other sound -- the return at 09:50:32 falls inside
+    it and stays a body update, and the news keeps until the cooldown lets it out.
+
+    10:08:34 is a fresh event: the last report anything could type was 8 minutes back,
+    and a weightless story-30 report no longer holds a zone alive (#16). One channel at
+    0.6 opens it, so it is a WATCH until a second pair of eyes turns up.
     """
     assert sounds("2026-08-30T09-40_10-20") == [
         ("09:41:27", "NEW", "INFO", "БпЛА над Києвом"),
         ("09:45:05", "NEW", "WATCH", "БпЛА поруч"),
         ("09:46:01", "NEW", "WATCH", "БпЛА над домом — одне джерело"),
         ("09:46:05", "PROMOTE", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("09:55:45", "RESOUND", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("10:08:34", "NEW", "WATCH", "БпЛА над домом — одне джерело"),
     ]
 
 

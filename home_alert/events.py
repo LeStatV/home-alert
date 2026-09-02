@@ -174,6 +174,7 @@ class Drone:
     chained: bool = False     # a channel followed its own reply chain into this zone
     count: int = 0            # largest figure any one channel gave, never their sum
     echo: tuple = None        # (time, places, channel) of the last report folded in
+    left: bool = False        # the drone has been reported in another zone since
 
     # A drone event has no launch concept: nothing launches, so there is nothing to
     # count and no launch clock. `events.launches` is NULL for these rows, never 0 --
@@ -235,9 +236,11 @@ class Drone:
         if weight:
             # a weightless story-30 report is not a fact worth halving a real second
             # source against: it would turn the wake-up into a WATCH, which is the one
-            # thing a fail-safe path must never do
+            # thing a fail-safe path must never do. Nor does it keep the event alive:
+            # a report nothing could type must not hold the zone's re-sound clock down
+            # and silence the next real one (#16).
             self.echo = (message.time, set(named), message.channel)
-        self.last = message.time
+            self.last = message.time
 
 
 class Pipeline:
@@ -253,6 +256,7 @@ class Pipeline:
         # at all, and every path below is written to work without one
         self.enricher = enricher or enrichment.client(config.get("llm"))
         self.resound_gap = timedelta(minutes=config["ballistic"]["resound_gap_min"])
+        self.urgent_floor = timedelta(minutes=config["urgent_floor_min"])
         self.home, self.nearby = set(config["home"]), set(config["nearby"])
         self.cooldown = {tier: timedelta(minutes=minutes)
                          for tier, minutes in config["drone"]["cooldown_min"].items()}
@@ -274,7 +278,21 @@ class Pipeline:
         self.context = Context()
         self.drones = {}          # zone -> the live Drone event there
         self.sounded = {}         # (zone, tier) -> when it last made a noise
+        self.urgent_sounded = None    # when anything last bypassed Do-Not-Disturb
         self.tracked = {}         # (channel, msg id) -> (time, zone) of a drone report
+
+    def floored(self, kind, tier, when):
+        """One floor under every sound that bypasses Do-Not-Disturb, whatever event it
+        came from: on 19 Aug a missile URGENT and a ballistic URGENT rang 18 s apart for
+        one raid, each event's own clock happily kept (#16). Only a repeat is floored --
+        a NEW event or a promotion is news the household has not heard yet.
+        """
+        if (kind == "RESOUND" and tier == "URGENT" and self.urgent_sounded
+                and when - self.urgent_sounded < self.urgent_floor):
+            return "UPDATE"
+        if kind != "UPDATE" and tier == "URGENT":
+            self.urgent_sounded = when
+        return kind
 
     def tail(self, when, places, sources, last):
         """The body under the message itself: the chain the event has travelled, who
@@ -497,7 +515,7 @@ class Pipeline:
             if event is None:
                 event = self.live[etype] = Event(etype, message.time, message.time,
                                                  message.time, pending=not target)
-                kind = "NEW"
+                kind = self.floored("NEW", event.tier, message.time)
             else:
                 event.launches += 1
                 event.last_launch = message.time
@@ -507,6 +525,9 @@ class Pipeline:
                 kind = ("PROMOTE" if event.pending and target else
                         "RESOUND" if not event.pending and text != event.last_text
                         and message.time - event.sounded >= self.resound_gap else "UPDATE")
+                # a promotion is pushed as URGENT: the flag it clears is set below
+                kind = self.floored(kind, "URGENT" if kind == "PROMOTE" and etype != "other"
+                                    else event.tier, message.time)
                 if kind != "UPDATE":
                     event.pending = False
                     event.sounded = message.time
@@ -530,7 +551,9 @@ class Pipeline:
             if event.pending:
                 event.pending = False
                 event.sounded = message.time
-                emit("PROMOTE", "URGENT", event.title, event.tag, event.count, event)
+                # a promotion is never floored; it still stamps the floor for what follows
+                emit(self.floored("PROMOTE", "URGENT", message.time),
+                     "URGENT", event.title, event.tag, event.count, event)
             else:
                 emit("UPDATE", event.tier, event.title, event.tag, event.count, event)
             done(event)
@@ -579,6 +602,13 @@ class Pipeline:
             fresh = drone is None or message.time - drone.last > DRONE_WINDOW
             if fresh:
                 drone = self.drones[zone] = Drone(zone, message.time, message.time)
+            # a report from the ring says the drone is not over the house right now:
+            # whatever comes back has news to tell. Only the house keeps this flag -- the
+            # ring is where a drone passes through, the house is where it returns to --
+            # and only a report something could type sets it, for the same reason a
+            # weightless one brings no count: it must not become a way to ring.
+            if zone == "NEARBY" and not untyped and "HOME" in self.drones:
+                self.drones["HOME"].left = True
             was, counted = drone.tier, drone.count
             # a weightless report brings its places and nothing else: its count would
             # be a second way to ring on a message nobody could type (story 7)
@@ -586,9 +616,12 @@ class Pipeline:
                          chained, 0 if untyped else parse.count)
 
             # a count jump is new information and may ring again (story 7); restating
-            # the same figure is the same fact, and the cooldown below gates both
+            # the same figure is the same fact, and the cooldown below gates both. So is
+            # a re-entry: the drone was over the house, went out to the ring and is back
+            # (#16) -- on 1-2 Sep such a pass rang once, because the event never closed
+            # and every return was a silent body update.
             kind = ("NEW" if fresh else "PROMOTE" if drone.tier != was
-                    else "RESOUND" if drone.count > counted else "UPDATE")
+                    else "RESOUND" if drone.count > counted or drone.left else "UPDATE")
             # The cooldown gates the sound, not the notification: a gated NEW still goes
             # out silently, so the body on the phone stays current (spec story 33). It is
             # kept per zone rather than globally per tier -- a drone that has moved from
@@ -597,7 +630,10 @@ class Pipeline:
             if (kind != "UPDATE" and last
                     and message.time - last < self.cooldown[drone.tier]):
                 kind = "UPDATE"
+            kind = self.floored(kind, drone.tier, message.time)
             if kind != "UPDATE":
+                # the return has been announced; the next one has to be earned again
+                drone.left = False
                 self.sounded[(zone, drone.tier)] = message.time
             emit(kind, drone.tier, drone.title, drone.tag, drone.count, drone)
             done(drone)

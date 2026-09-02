@@ -27,6 +27,9 @@ drone:
     WATCH: 10
     INFO: 20
 
+urgent_floor_min: 2  # the household hears at most one DND-bypassing sound per this
+                     # many minutes, however many events are live at once (#16)
+
 ballistic:
   resound_gap_min: 2       # minimum gap between sounds on one event; the rest of the
                            # three-stage timings are fixed by the spec, see events.py
