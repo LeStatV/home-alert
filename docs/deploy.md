@@ -13,6 +13,13 @@ in `./data`.
   rest keep working; without `@air_alert_ua` every push reads `⚪ сирена невідома` and
   the all-clear waits for a channel to say it is over.
 - API credentials from https://my.telegram.org -> API development tools.
+- The per-deployment files, copied from the committed examples (the copies are
+  gitignored -- one household's ntfy URL, Tailscale IP and cooldowns are nobody
+  else's):
+
+      cp config.example.yaml config.yaml
+      cp docker-compose.example.yml docker-compose.yml
+
 - `.env` next to `docker-compose.yml` (gitignored, never committed):
 
       TG_API_ID=1234567
@@ -23,7 +30,9 @@ in `./data`.
   even `docker compose up -d ntfy` refuses to start while one of them is missing.
 
 - In `config.yaml`, point `ntfy.url` at the ntfy service: `http://ntfy` from inside
-  compose. The file is mounted read-only, so this needs no rebuild.
+  compose. The file is mounted read-only, so this needs no rebuild. In
+  `docker-compose.yml`, put the host's Tailscale IP in the ntfy `ports` line so the
+  phones can reach it.
 
 ## First run
 
@@ -61,7 +70,7 @@ anonymous subscriber sees nothing.
 - **Replace-in-place**: one event owns one entry in the notification shade, which the
   agent gets by publishing every update with the same ntfy `sequence_id`
   ([docs.ntfy.sh/publish](https://docs.ntfy.sh/publish/#updating-notifications)). This
-  needs the ntfy **server >= 2.16** (pinned in `docker-compose.yml`) and the **Android
+  needs the ntfy **server >= 2.16** (pinned in `docker-compose.example.yml`) and the **Android
   app >= 1.22.2** (the app is versioned 1.x, the server 2.x). iOS is not on ntfy's supported list for notification updates, so an
   iPhone stacks the updates -- there is nothing the agent can send to change that.
   Worth an eyeball on the phone after the first raid: the trajectory should rewrite one

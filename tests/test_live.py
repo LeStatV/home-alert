@@ -14,7 +14,7 @@ BALLISTIC = "2026-08-21T21-54_22-06"
 
 
 def config():
-    loaded = yaml.safe_load((ROOT / "config.yaml").read_text())
+    loaded = yaml.safe_load((ROOT / "config.example.yaml").read_text())
     loaded["profiles"] = ROOT / "profiles"
     return loaded
 
