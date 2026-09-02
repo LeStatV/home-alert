@@ -371,6 +371,31 @@ def test_28_aug_the_cooldown_changes_the_sounds_and_nothing_else():
             == len(replay("2026-08-28T00-30_08-00")))
 
 
+def test_2_sep_a_drone_that_keeps_coming_back_keeps_ringing():
+    """2 Sep 07:00-07:35 UTC (10:00-10:35 Kyiv), the pass that prompted #16: a drone
+    works the ring and the home set for half an hour, in and out of Нивки and Антонов.
+
+    Before #16 the phone rang once, at 07:10:30, and every return was a silent body
+    update -- the event never closed, so nothing but a count jump could ring it again.
+    Now each return re-sounds: nebo_raketa's `Нивки - Сирець` at 07:19:29 and
+    AerisRimor's `Антонов` at 07:27:08, both after the drone had been reported in the
+    ring, both spaced by the 5-min URGENT cooldown.
+
+    07:27:54 is the other half of the ticket, item 40: the reports that carried the home
+    event through 07:20-07:27 were ones nothing could type, they no longer hold a zone
+    alive, and eight minutes after the last typed one the next report opens a fresh
+    event. One source, so it is a WATCH until a second pair of eyes turns up.
+    """
+    assert audible("2026-09-02T07-00_07-35") == [
+        ("07:08:41", "NEW", "WATCH", "БпЛА поруч"),
+        ("07:10:30", "NEW", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("07:19:29", "RESOUND", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("07:27:08", "RESOUND", "URGENT", "БпЛА НАД ДОМОМ"),
+        ("07:27:34", "RESOUND", "WATCH", "БпЛА поруч"),
+        ("07:27:54", "NEW", "WATCH", "БпЛА над домом — одне джерело"),
+    ]
+
+
 def test_30_aug_drones_over_other_regions_never_reach_the_phone():
     """Reports whose only places are outside Kyiv and its oblast -- Чернігівщина,
     Полтавщина, Дніпропетровщина -- are stored like every other message and pushed
