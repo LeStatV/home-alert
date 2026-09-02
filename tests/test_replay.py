@@ -152,6 +152,24 @@ def test_25_aug_a_bumped_target_call_never_becomes_a_kyiv_urgent():
     ]
 
 
+def test_the_word_target_in_a_sentence_is_not_a_launch():
+    """SYNTHETIC fixture -- the live agent pushed this on 2 Sep 09:52 and the corpus
+    slices predate it. nebo_raketa telling the districts a Shahed circles overhead to
+    watch out *during the next* ballistic attack ends on the word `цілі`, which is all
+    the end-anchored launch alternative needed: with a threat declared minutes earlier
+    it opened a pending WATCH for a launch nobody reported (#34).
+
+    The word is a launch call when the message is the call and a noun when it sits in a
+    sentence. `І ще групова ціль` is the same word in the same place and still rings:
+    "another target" is the idiom that says a launch call is what it is, whatever
+    sentence it arrives in.
+    """
+    assert replay("synthetic-target-word-in-a-sentence") == [
+        ("09:50:00", "NEW", "INFO", "Загроза балістики"),
+        ("09:54:00", "NEW", "WATCH", "Пуск балістики, ціль уточнюється"),
+    ]
+
+
 def test_resound_gap_is_configuration():
     """Widening the resound gap collapses the repeat launch calls into the body."""
     assert [p[1] for p in audible("2026-08-27T00-00_00-30", resound_gap_min=10)] == [
