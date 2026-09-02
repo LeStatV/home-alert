@@ -845,8 +845,9 @@ def test_replay_over_the_live_database_reproduces_the_recorded_pushes(tmp_path, 
 
     monkeypatch.chdir(ROOT)         # and the same thing through the command line
     capsys.readouterr()
+    # the committed config: a deployment's own `config.yaml` is gitignored (#31)
     assert cli.main(["replay", "2026-08-27T00:00", "2026-08-27T00:30",
-                     "--db", db, "--from-db"]) == 0
+                     "--config", "config.example.yaml", "--db", db, "--from-db"]) == 0
     printed = capsys.readouterr().out
     assert printed.splitlines()[0].endswith("2026-08-27T00:00 .. 2026-08-27T00:30")
     assert "БАЛІСТИКА на Київ" in printed
