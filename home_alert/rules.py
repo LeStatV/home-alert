@@ -19,9 +19,24 @@ LAUNCH = re.compile(
     # `\s+` matters: without it `\w*` backtracks and "балістична загроза" reads as "на"
     r"(?<!загроза )баліст\w*\s+(на\b|летить|летять)|баліст\w*\s*[-—]"
     r"|^\W*(ще |друга |третя |\d+ )?ціл[ьі]" + APOSTROPHE + r"(?![а-яіїєґ'])"
-    r"|\bціл[ьі]" + APOSTROPHE + r"\W*$|ціль на"
+    r"|ціль на"
     r"|спуск баліст|\bвих[іо]д|пуск баліст|балістичн\w* ракет\w* на|\d+ балістик"
     r"|🚀 ?ще\b|🚀 ?пуск", re.I)
+# A message that *ends* on `ціль`/`цілі` is a launch call when the message is nothing
+# but the call -- `Полтава ціль!`, `Миколаїв 4+ цілі.`, `Ще одна ціль`, the place-first
+# forms the start-anchored alternative above misses. In a sentence the word is just the
+# noun: «Ворог вислідковує собі цілі», «шукає ціль», «Це все різні цілі» -- nothing
+# launched there (#34). Word count separates them and length does not: `Це все різні
+# цілі.` is 18 characters and `Миколаїв 4+ цілі.` is 17.
+#
+# `ще` is the exception the count would lose: `В мене просто слів немає, ЩЕ 3 ЦІЛІ` and
+# `І ще групові цілі` are launch calls with a sentence around them, and "another target"
+# is the one idiom that says so on its own.
+TARGET_CALL = re.compile(r"\bціл[ьі]" + APOSTROPHE + r"\W*$", re.I)
+ANOTHER = re.compile(r"\bще\b[^.!?]{0,24}ціл[ьі]" + APOSTROPHE + r"\W*$", re.I)
+CALL_WORDS = 3
+WORD = re.compile(r"\w+")
+
 BALLISTIC = re.compile(r"баліст|балист|☄|іскандер|кинжал", re.I)
 # Cruise and hypersonic missiles (BEHAVIOR.md fix 5). `кр` is war_monitor's and
 # AerisRimor's own shorthand for «крилата ракета»; bare `ракета` is deliberately absent
@@ -233,7 +248,9 @@ def classify(text, profile=None):
     return Parse(
         places=places(text, profile),
         is_threat=is_threat,
-        is_launch=says("launch", text, profile) and present,
+        is_launch=bool(says("launch", text, profile) or ANOTHER.search(text)
+                       or (TARGET_CALL.search(text)
+                           and len(WORD.findall(text)) <= CALL_WORDS)) and present,
         is_approach=bool(APPROACH.search(text)) and present,
         is_direction=bool(DIRECTION.search(text)) and present,
         names_missile=says("missile", text, profile),
